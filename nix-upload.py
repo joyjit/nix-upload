@@ -11,6 +11,11 @@ from selenium.webdriver.support import expected_conditions as EC
 import traceback
 import re
 import logging
+import tempfile
+import atexit
+import shutil
+from PIL import Image
+
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -21,6 +26,26 @@ logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
+# Global variable to keep track of temporary directories
+temp_directories = []
+
+def cleanup_temp_files():
+    """Clean up all temporary directories and files created by the program."""
+    global temp_directories
+    for temp_dir in temp_directories:
+        try:
+            if os.path.exists(temp_dir):
+                logger.info(f"Cleaning up temporary directory: {temp_dir}")
+                shutil.rmtree(temp_dir)
+        except Exception as e:
+            logger.error(f"Failed to clean up temporary directory {temp_dir}: {str(e)}")
+    
+    # Clear the list after cleanup
+    temp_directories = []
+
+# Register the cleanup function to be called when the program exits
+atexit.register(cleanup_temp_files)
+
 
 def save_debug_snapshot(driver, label):
     """Save screenshot and page source for debugging."""
@@ -46,7 +71,8 @@ def load_config(config_file='config.json'):
         with open(config_file, 'r') as f:
             config = json.load(f)
         
-        required_keys = ['username', 'password', 'playlist_name', 'photos_directory', 'max_photos', 'base_url']
+        required_keys = ['username', 'password', 'playlist_name', 'photos_directory', 
+                'max_photos', 'base_url', 'max_file_size_mb', 'batch_size', 'image_width', 'image_height',]
         for key in required_keys:
             if key not in config:
                 raise KeyError(f"Missing required key '{key}' in config file")
@@ -67,11 +93,16 @@ import os
 
 import os
 
-def get_image_files(directory, max_file_size_mb, max_photos):
+import os
+import random
+import logging
+
+logger = logging.getLogger(__name__)
+
+def get_image_files(directory, max_file_size_mb, max_photos, target_width, target_height):
     """Recursively get all image files from a directory, skipping folders with a .nonixplay file."""
     valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
     image_files = []
-
     try:
         for root, dirs, files in os.walk(directory):
             # Skip this directory if it contains a .nonixplay file
@@ -79,26 +110,36 @@ def get_image_files(directory, max_file_size_mb, max_photos):
                 logger.debug(f"Skipping directory: {root} (contains .nonixplay)")
                 dirs[:] = []  # Prevent descending into subdirectories
                 continue
-
             for file in files:
                 if any(file.lower().endswith(ext) for ext in valid_extensions):
                     image_files.append(os.path.join(root, file))
-
-        max_file_size = max_file_size_mb * 1024 * 1024
-        # Filter out large files
-        filtered_images = [f for f in image_files if os.path.getsize(f) <= max_file_size]
-        logger.debug(f"Filtered images: {len(filtered_images)} files below the {max_file_size_mb}MB limit.")
         
-        # Randomly select max_photos number of photos
-        import random
-        if len(filtered_images) > max_photos:
-            selected_images = random.sample(filtered_images, max_photos)
+        # Randomly select max_photos number of photos (from all images, not filtering by size first)
+        if len(image_files) > max_photos:
+            selected_images = random.sample(image_files, max_photos)
             logger.info(f"Randomly selected {len(selected_images)} photos for upload.")
         else:
-            selected_images = filtered_images
+            selected_images = image_files
             logger.info(f"Selected all {len(selected_images)} photos for upload (fewer than max_photos).")
-
-        return selected_images        
+        
+        # Create temporary directory for processed images
+        temp_dir = tempfile.mkdtemp(prefix="nix_upload_temp_")
+        # Add to the global list for cleanup
+        global temp_directories
+        temp_directories.append(temp_dir)
+        logger.info(f"Created temporary directory: {temp_dir}")
+        
+        # Process selected images and check size after conversion
+        max_file_size = max_file_size_mb * 1024 * 1024
+        final_images = []
+        for img_path in selected_images:
+            processed_path = resize_image(img_path, temp_dir, target_width, target_height, max_file_size)
+            if processed_path:
+                final_images.append(processed_path)
+        
+        logger.info(f"Successfully processed {len(final_images)} of {len(selected_images)} selected images.")
+        return final_images
+        
     except FileNotFoundError:
         logger.error(f"Directory '{directory}' not found.")
         exit(1)
@@ -106,6 +147,51 @@ def get_image_files(directory, max_file_size_mb, max_photos):
         logger.error(f"get_image_files() Exception: {str(e)}")
         exit(1)
 
+def resize_image(image_path, temp_dir, target_width, target_height, max_file_size):
+    """
+    Resize image to fit the target dimensions and ensure it's under max_file_size.
+    Returns path to resized image or None if processing failed or file is too large.
+    """
+    try:
+        with Image.open(image_path) as img:
+            # Calculate dimensions while maintaining aspect ratio
+            img_width, img_height = img.size
+            aspect_ratio = img_width / img_height
+            
+            if img_width / target_width > img_height / target_height:
+                # Width is the limiting factor
+                new_width = target_width
+                new_height = int(new_width / aspect_ratio)
+            else:
+                # Height is the limiting factor
+                new_height = target_height
+                new_width = int(new_height * aspect_ratio)
+            
+            # Resize image
+            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Create output path in temp directory
+            img_filename = os.path.basename(image_path)
+            output_path = os.path.join(temp_dir, img_filename)
+            
+            # Save with 80% quality for JPG/JPEG
+            if img_filename.lower().endswith(('.jpg', '.jpeg')):
+                resized_img.save(output_path, quality=80)
+            else:
+                resized_img.save(output_path)
+            
+            # Check if the processed file is still too large
+            if os.path.getsize(output_path) > max_file_size:
+                logger.debug(f"Skipping {img_filename}: too large after resizing ({os.path.getsize(output_path)/1024/1024:.2f}MB)")
+                os.remove(output_path)  # Clean up the temporary file
+                return None
+            
+            logger.debug(f"Successfully resized {img_filename} to {new_width}x{new_height}")
+            return output_path
+    
+    except Exception as e:
+        logger.warning(f"Failed to process image {image_path}: {str(e)}")
+        return None
 
 def setup_webdriver():
     """Set up and configure Chrome WebDriver."""
@@ -522,13 +608,14 @@ def main():
     base_url = config['base_url'].rstrip('/')
     max_file_size_mb = config['max_file_size_mb']
     batch_size = config['batch_size']
+    image_width = config['image_width']
+    image_height = config['image_height']
     
-    image_files = get_image_files(photos_directory, max_file_size_mb, max_photos)
+    image_files = get_image_files(photos_directory, max_file_size_mb, max_photos, image_width, image_height)
     if not image_files:
         logger.error(f"No image files found in '{photos_directory}'.")
         exit(1)
     logger.info(f"Found {len(image_files)} image files.")
-    
     driver = setup_webdriver()
     
     try:
