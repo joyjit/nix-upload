@@ -21,8 +21,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-# logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
@@ -152,7 +152,6 @@ def resize_image(image_path, temp_dir, target_width, target_height, max_file_siz
     Resize image to fit the target dimensions and ensure it's under max_file_size.
     Returns path to resized image or None if processing failed or file is too large.
     """
-    logger.info(f"Resizing image files in {temp_dir}...")
     try:
         with Image.open(image_path) as img:
             # Calculate dimensions while maintaining aspect ratio
@@ -208,8 +207,8 @@ def setup_webdriver():
         options.page_load_strategy = 'normal'
         
         # by defdault we want headless
-        options.headless = True
-        options.add_argument("--headless")
+        options.headless = False
+        # options.add_argument("--headless")
         
         options.add_argument("--log-level=1") # cap the loglevel at INFO
         
