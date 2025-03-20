@@ -377,8 +377,8 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
     logger.debug("Monitoring batch upload progress...")
     last_progress = 0
     last_progress_change_time = time.time()
-    stall_timeout = max(200, len(batch))  # batch_size seconds to wait if progress stops changing
-    max_upload_time = max(300, 2 * len(batch))  # maximum 2*batch_size seconds per batch
+    stall_timeout = min(200, len(batch))  # batch_size seconds to wait if progress stops changing
+    max_upload_time = min(300, 2 * len(batch))  # maximum 2*batch_size seconds per batch
     start_time = time.time()
 
     while True:
