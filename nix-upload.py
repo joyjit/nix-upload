@@ -152,6 +152,7 @@ def resize_image(image_path, temp_dir, target_width, target_height, max_file_siz
     Resize image to fit the target dimensions and ensure it's under max_file_size.
     Returns path to resized image or None if processing failed or file is too large.
     """
+    logger.info(f"Resizing image files in {temp_dir}...")
     try:
         with Image.open(image_path) as img:
             # Calculate dimensions while maintaining aspect ratio
@@ -311,7 +312,7 @@ def find_playlist(driver, base_url, playlist_name):
 # from selenium.webdriver.support.ui import WebDriverWait
 # from selenium.webdriver.support import expected_conditions as EC
 
-def delete_all_photos(driver, timeout=10):
+def delete_all_photos(driver, timeout=500):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
