@@ -420,7 +420,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
         driver.execute_script("arguments[0].scrollIntoView(true);", add_photos_button)
         driver.execute_script("arguments[0].click();", add_photos_button)
     except Exception as e:
-        logger.warning(f"❌ Error clicking 'Add photos': {e}, continuing")
+        logger.warning(f"Failed to click on 'Add photos': {e}, continuing")
         save_debug_snapshot(driver, f"add_photos_error_batch_{batch_number}")
         return False
         
@@ -429,7 +429,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
         from_computer = wait.until(EC.presence_of_element_located((By.XPATH, "//span[text()='From my computer']")))
         driver.execute_script("arguments[0].click();", from_computer)
     except Exception as e:
-        logger.warning(f"❌ Error clicking 'From my computer': {e}, continuing")
+        logger.warning(f"Failed to click on 'From my computer': {e}, continuing")
         save_debug_snapshot(driver, f"from_my_computer_error_batch_{batch_number}")
         return False
         
