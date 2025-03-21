@@ -473,13 +473,12 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
     
     """Upload a single batch of photos and monitor progress."""
     wait = WebDriverWait(driver, 120)
+    short_wait = WebDriverWait(driver, 5)  # Shorter wait for checking error modals
     
     # Display all file names in this batch
     logger.debug(f"Files in this batch:")
     for idx, file_path in enumerate(batch):
         logger.debug(f"  {idx+1}. {os.path.basename(file_path)}")
-    
-    
     
     # Click "Add photos"
     try:
@@ -518,7 +517,6 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
         save_debug_snapshot(driver, f"upload_input_error_batch_{batch_number}")
         return False
         
-        
     # Monitor upload progress
     logger.debug("Waiting for upload progress indicator...")
     upload_text_xpath = "//span[contains(text(), 'files completed')]"
@@ -537,6 +535,45 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
     start_time = time.time()
 
     while True:
+        # Check for server error modal
+        try:
+            error_modal = short_wait.until(EC.presence_of_element_located(
+                (By.XPATH, "//nix-modal//span[contains(@class, 'nix-modal-title-text') and text()='Failed Upload']")
+            ))
+            
+            if error_modal:
+                logger.warning("Server error modal detected. Attempting to click OK button")
+                save_debug_snapshot(driver, f"server_error_modal_batch_{batch_number}")
+                
+                try:
+                    # Find and click the OK button in the error modal
+                    ok_button = short_wait.until(EC.element_to_be_clickable(
+                        (By.XPATH, "//nix-modal//button[text()='Ok']")
+                    ))
+                    driver.execute_script("arguments[0].click();", ok_button)
+                    logger.info("Successfully clicked OK on server error modal")
+                    
+                    # Optional: Log the rejected files
+                    try:
+                        rejected_files = driver.find_elements(By.XPATH, "//nix-modal//div[contains(text(), 'Server error')]")
+                        if rejected_files:
+                            logger.warning(f"Server rejected {len(rejected_files)} files:")
+                            for file_elem in rejected_files:
+                                logger.warning(f"  - {file_elem.text}")
+                    except Exception as e:
+                        logger.warning(f"Failed to log rejected files: {e}")
+                    
+                    # Wait briefly after dismissing the modal
+                    time.sleep(2)
+                except Exception as e:
+                    logger.warning(f"Failed to dismiss server error modal: {e}")
+                    save_debug_snapshot(driver, f"error_modal_dismiss_failed_{batch_number}")
+        except TimeoutException:
+            # No error modal found, continue with upload monitoring
+            pass
+        except Exception as e:
+            logger.warning(f"Error checking for server error modal: {e}")
+            
         # Check for absolute timeout
         if time.time() - start_time > max_upload_time:
             logger.info(f"\nMaximum upload time ({max_upload_time}s) reached. Assuming complete.")
@@ -556,7 +593,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                     # Get the total from the text which may be different from our batch size
                     website_total = int(parts[1].split(" ")[0])
             except ValueError:
-                logger.warning("Progress bar {text} could not be parsed. Continuing")
+                logger.warning(f"Progress bar text '{text}' could not be parsed. Continuing")
                 pass  # Progress couldn't be parsed
                 
             if current_progress > 0:
@@ -576,7 +613,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                     
                 # If we reached the expected end count for this batch, exit
                 if current_progress >= batch_end_count:
-                    time.sleep(5)  # Give it 5 seconds after reaching target
+                    time.sleep(5)  # Give it a few seconds after reaching target
                     logger.debug(f"\nUpload reached target {batch_end_count} - batch complete")
                     break
             else:
@@ -598,7 +635,6 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
     print(f"\r")
     logger.debug(f"Batch {batch_number} upload complete.")
     return True
-
 
 def upload_photos(driver, selected_images, batch_size):
     """Upload photos to the current playlist in batches."""
