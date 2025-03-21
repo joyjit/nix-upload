@@ -67,16 +67,33 @@ def save_debug_snapshot(driver, label):
 
 def load_config(config_file='config.json'):
     """Load configuration from JSON file."""
+    # Define all config keys in one place
+    CONFIG_KEYS = [
+        'username',
+        'password',
+        'playlist_name',
+        'photos_directory',
+        'max_photos',
+        'base_url',
+        'max_file_size_mb',
+        'batch_size',
+        'image_width',
+        'image_height',
+    ]
+    
     try:
         with open(config_file, 'r') as f:
             config = json.load(f)
         
-        required_keys = ['username', 'password', 'playlist_name', 'photos_directory', 
-                'max_photos', 'base_url', 'max_file_size_mb', 'batch_size', 'image_width', 'image_height',]
-        for key in required_keys:
+        # Validate all required keys exist
+        for key in CONFIG_KEYS:
             if key not in config:
                 raise KeyError(f"Missing required key '{key}' in config file")
         
+        # Apply any transformations to config values
+        if 'base_url' in config:
+            config['base_url'] = config['base_url'].rstrip('/')
+            
         return config
     except FileNotFoundError:
         logger.error(f"Config file '{config_file}' not found.")
@@ -88,10 +105,6 @@ def load_config(config_file='config.json'):
         logger.error(f"Failure loading config: {str(e)}")
         exit(1)
 
-
-import os
-
-import os
 
 import os
 import random
@@ -596,41 +609,44 @@ def upload_photos(driver, selected_images, batch_size):
         logger.error(f"upload_photos() Exception: {e}")
         save_debug_snapshot(driver, "upload_exception")
         return False
+
+from types import SimpleNamespace
         
 def main():
     """Main function to orchestrate the Nixplay photo upload process."""
     config = load_config()
-    username = config['username']
-    password = config['password']
-    playlist_name = config['playlist_name']
-    photos_directory = config['photos_directory']
-    max_photos = config['max_photos']
-    base_url = config['base_url'].rstrip('/')
-    max_file_size_mb = config['max_file_size_mb']
-    batch_size = config['batch_size']
-    image_width = config['image_width']
-    image_height = config['image_height']
     
-    image_files = get_image_files(photos_directory, max_file_size_mb, max_photos, image_width, image_height)
+    # Convert dictionary to an object with attributes
+    cfg = SimpleNamespace(**config)
+    
+    # Now you can use cfg.username, cfg.password, etc.
+    for key, value in vars(cfg).items():
+        if key == "password":
+            logger.debug(f"{key}: **************")
+        else:
+            logger.debug(f"{key}: {value}")
+      
+    image_files = get_image_files(cfg.photos_directory, cfg.max_file_size_mb, cfg.max_photos, cfg.image_width, cfg.image_height)
     if not image_files:
-        logger.error(f"No image files found in '{photos_directory}'.")
+        logger.error(f"No image files found in '{cfg.photos_directory}'.")
         exit(1)
+
     logger.info(f"Found {len(image_files)} image files.")
     driver = setup_webdriver()
     
     try:
-        if not login_to_nixplay(driver, base_url, username, password):
+        if not login_to_nixplay(driver, cfg.base_url, cfg.username, cfg.password):
             logger.error("Login failed. Exiting.")
             exit(1)
         
-        if not find_playlist(driver, base_url, playlist_name):
-            logger.error(f"Could not find playlist '{playlist_name}'. Exiting.")
+        if not find_playlist(driver, cfg.base_url, cfg.playlist_name):
+            logger.error(f"Could not find playlist '{cfg.playlist_name}'. Exiting.")
             exit(1)
         
         if not delete_all_photos(driver):
             logger.error("Failed to delete existing photos. Continuing with upload...")
         
-        if not upload_photos(driver, image_files, batch_size):
+        if not upload_photos(driver, image_files, cfg.batch_size):
             logger.error("Failed to upload photos.")
             exit(1)
         
