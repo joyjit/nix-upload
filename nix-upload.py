@@ -19,13 +19,14 @@ from PIL import Image
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Initialize logger
+# Initialize logger with a basic configuration
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-# logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
+# Set an initial level - this will be overridden by config if available
+logger.setLevel(logging.INFO)
+
 # Global variable to keep track of temporary directories
 temp_directories = []
 
@@ -79,6 +80,8 @@ def load_config(config_file='config.json'):
         'batch_size',
         'image_width',
         'image_height',
+        'log_level',  
+        'headless',
     ]
     
     try:
@@ -93,6 +96,15 @@ def load_config(config_file='config.json'):
         # Apply any transformations to config values
         if 'base_url' in config:
             config['base_url'] = config['base_url'].rstrip('/')
+        
+        # Configure the logger based on the log_level from config
+        log_level = config['log_level'].upper()
+        numeric_level = getattr(logging, log_level, None)
+        if not isinstance(numeric_level, int):
+            logger.warning(f"Invalid log level: {log_level}. Defaulting to INFO.")
+            numeric_level = logging.INFO
+        logger.setLevel(numeric_level)
+        logger.info(f"Log level set to {log_level}")
             
         return config
     except FileNotFoundError:
@@ -104,7 +116,6 @@ def load_config(config_file='config.json'):
     except Exception as e:
         logger.error(f"Failure loading config: {str(e)}")
         exit(1)
-
 
 import os
 import random
@@ -206,7 +217,7 @@ def resize_image(image_path, temp_dir, target_width, target_height, max_file_siz
         logger.warning(f"Failed to process image {image_path}: {str(e)}")
         return None
 
-def setup_webdriver():
+def setup_webdriver(headless):
     """Set up and configure Chrome WebDriver."""
     try:
         options = webdriver.ChromeOptions()
@@ -219,9 +230,9 @@ def setup_webdriver():
         options.add_argument("--ignore-certificate-errors")
         options.page_load_strategy = 'normal'
         
-        # by defdault we want headless
-        options.headless = True
-        options.add_argument("--headless")
+        options.headless = headless
+        if headless == True:
+            options.add_argument("--headless")
         
         options.add_argument("--log-level=1") # cap the loglevel at INFO
         
@@ -625,14 +636,14 @@ def main():
             logger.debug(f"{key}: **************")
         else:
             logger.debug(f"{key}: {value}")
-      
+    
     image_files = get_image_files(cfg.photos_directory, cfg.max_file_size_mb, cfg.max_photos, cfg.image_width, cfg.image_height)
     if not image_files:
         logger.error(f"No image files found in '{cfg.photos_directory}'.")
         exit(1)
 
     logger.info(f"Found {len(image_files)} image files.")
-    driver = setup_webdriver()
+    driver = setup_webdriver(cfg.headless)
     
     try:
         if not login_to_nixplay(driver, cfg.base_url, cfg.username, cfg.password):

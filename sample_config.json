@@ -8,5 +8,7 @@
 	"max_file_size_mb": 3,
 	"batch_size": 10,
 	"image_width": 1280,
-	"image_height": 800
+	"image_height": 800,
+    "log_level": "INFO",
+    "headless": True
 }
