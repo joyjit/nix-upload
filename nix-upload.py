@@ -67,56 +67,70 @@ def save_debug_snapshot(driver, label):
 
 
 def load_config(config_file='config.json'):
-    """Load configuration from JSON file."""
-    # Define all config keys in one place
-    CONFIG_KEYS = [
-        'username',
-        'password',
-        'playlist_name',
-        'photos_directory',
-        'max_photos',
-        'base_url',
-        'max_file_size_mb',
-        'batch_size',
-        'image_width',
-        'image_height',
-        'log_level',  
-        'headless',
-    ]
+    """Load configuration from JSON file with default values."""
     
+    DEFAULT_CONFIG = {
+        'playlist_name': 'nix-upload',
+        'max_photos': 300,
+        'base_url': 'https://app.nixplay.com',
+        'max_file_size_mb': 3,
+        'batch_size': 10,
+        'image_width': 1280,
+        'image_height': 800,
+        'log_level': 'INFO',
+        'headless': False,
+    }
+    
+    REQUIRED_KEYS = ['username', 'password', 'photos_directory']
+
     try:
         with open(config_file, 'r') as f:
             config = json.load(f)
         
-        # Validate all required keys exist
-        for key in CONFIG_KEYS:
+        # Check for required keys
+        for key in REQUIRED_KEYS:
             if key not in config:
-                raise KeyError(f"Missing required key '{key}' in config file")
-        
-        # Apply any transformations to config values
-        if 'base_url' in config:
-            config['base_url'] = config['base_url'].rstrip('/')
-        
-        # Configure the logger based on the log_level from config
-        log_level = config['log_level'].upper()
+                raise KeyError(f"Missing required key '{key}' in config file.")
+
+        # Merge defaults with loaded config
+        merged_config = DEFAULT_CONFIG.copy()
+        merged_config.update(config)
+
+        # Apply transformations
+        if 'base_url' in merged_config:
+            merged_config['base_url'] = merged_config['base_url'].rstrip('/')
+
+        # Validate headless is boolean
+        if not isinstance(merged_config['headless'], bool):
+            raise ValueError(f"The 'headless' parameter must be a boolean (True or False).")
+
+        # Configure logger
+        log_level = merged_config['log_level'].upper()
         numeric_level = getattr(logging, log_level, None)
         if not isinstance(numeric_level, int):
             logger.warning(f"Invalid log level: {log_level}. Defaulting to INFO.")
             numeric_level = logging.INFO
         logger.setLevel(numeric_level)
         logger.info(f"Log level set to {log_level}")
-            
-        return config
+
+        return merged_config
+
     except FileNotFoundError:
         logger.error(f"Config file '{config_file}' not found.")
         exit(1)
     except json.JSONDecodeError:
         logger.error(f"Failure parsing config file '{config_file}'. Please ensure it's valid JSON.")
         exit(1)
+    except KeyError as e:
+        logger.error(f"Config file error: {str(e)}")
+        exit(1)
+    except ValueError as e:
+        logger.error(f"Config file error: {str(e)}")
+        exit(1)
     except Exception as e:
         logger.error(f"Failure loading config: {str(e)}")
         exit(1)
-
+        
 import os
 import random
 import logging
@@ -636,7 +650,7 @@ def main():
             logger.debug(f"{key}: **************")
         else:
             logger.debug(f"{key}: {value}")
-    
+
     image_files = get_image_files(cfg.photos_directory, cfg.max_file_size_mb, cfg.max_photos, cfg.image_width, cfg.image_height)
     if not image_files:
         logger.error(f"No image files found in '{cfg.photos_directory}'.")

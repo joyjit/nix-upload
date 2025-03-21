@@ -1,14 +1,14 @@
 {
     "username": "USERNAME",
     "password": "PASSWORD",
-    "playlist_name": "nix-upload",
     "photos_directory": "PATH/TO/ROOT/OF/YOUR/PHOTOS/DIR",
-    "max_photos": 300,
+    "playlist_name": "nix-upload",
+    "max_photos": 100,
     "base_url": "https://app.nixplay.com",
 	"max_file_size_mb": 3,
 	"batch_size": 10,
 	"image_width": 1280,
 	"image_height": 800,
     "log_level": "INFO",
-    "headless": True
+    "headless": "TRUE"
 }
