@@ -287,7 +287,6 @@ def login_to_nixplay(driver, base_url, username, password):
         save_debug_snapshot(driver, "login_page_loaded")
         
         wait = WebDriverWait(driver, 40)
-
         logger.debug("Waiting for email field...")
         email_field = wait.until(EC.presence_of_element_located((By.ID, "login_username")))
         logger.debug("Found email field.")
@@ -303,6 +302,22 @@ def login_to_nixplay(driver, base_url, username, password):
         login_button = wait.until(EC.element_to_be_clickable((By.ID, "nixplay_login_btn")))
         logger.debug("Clicking login button...")
         login_button.click()
+        
+        # Check for invalid credentials error before waiting for URL change
+        try:
+            # Short timeout for checking error message
+            error_wait = WebDriverWait(driver, 5)
+            error_message = error_wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".login-error-container ul.error li"))
+            )
+            
+            if "Please use your username and password" in error_message.text:
+                logger.error("Login failed: Invalid credentials: Please use your username and password")
+                save_debug_snapshot(driver, "login_failed_invalid_credentials")
+                return False
+        except TimeoutException:
+            # No error message found, continue with login flow
+            pass
         
         # Wait until the login redirects (e.g., away from /login)
         wait.until(EC.url_changes(login_url))
