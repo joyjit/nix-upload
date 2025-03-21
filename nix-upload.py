@@ -137,6 +137,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def display_progress_bar(prefix, current, total, suffix="", bar_width=50):
+    """Displays a dot-based progress bar in the console."""
+    
+   # Make sure current doesn't go negative (shouldn't happen but just in case)
+    current = max(0, current)
+    progress_ratio = min(current / total, 1.0)
+    dots = int(progress_ratio * bar_width)
+    spaces = bar_width - dots
+    progress_bar = "." * dots + " " * spaces
+    print(f"\r{prefix}: [{progress_bar}] ({current}/{total}) {suffix}", end="", flush=True)
+    
+def end_progress_bar():
+    print()
+    
 def get_image_files(directory, max_file_size_mb, max_photos, target_width, target_height):
     """Recursively get all image files from a directory, skipping folders with a .nonixplay file."""
     valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
@@ -165,17 +179,19 @@ def get_image_files(directory, max_file_size_mb, max_photos, target_width, targe
         # Add to the global list for cleanup
         global temp_directories
         temp_directories.append(temp_dir)
-        logger.info(f"Created temporary directory: {temp_dir}")
+        logger.info(f"Resizing files in: {temp_dir}")
         
         # Process selected images and check size after conversion
         max_file_size = max_file_size_mb * 1024 * 1024
         final_images = []
-        for img_path in selected_images:
+        for i, img_path in enumerate(selected_images):
             processed_path = resize_image(img_path, temp_dir, target_width, target_height, max_file_size)
             if processed_path:
                 final_images.append(processed_path)
-        
-        logger.info(f"Successfully processed {len(final_images)} of {len(selected_images)} selected images.")
+            display_progress_bar("Resizing", i+1, max_photos)
+        end_progress_bar()
+
+        logger.debug(f"Resized {len(final_images)} of {len(selected_images)} selected images.")
         return final_images
         
     except FileNotFoundError:
@@ -224,7 +240,7 @@ def resize_image(image_path, temp_dir, target_width, target_height, max_file_siz
                 os.remove(output_path)  # Clean up the temporary file
                 return None
             
-            logger.debug(f"Successfully resized {img_filename} to {new_width}x{new_height}")
+            # logger.debug(f"Successfully resized {img_filename} to {new_width}x{new_height}")
             return output_path
     
     except Exception as e:
@@ -534,17 +550,9 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                     
                 batch_start_count = (batch_number-1)*total_for_batch+1
                 batch_progress = current_progress - batch_start_count + 1
-                
-                # Make sure batch_progress doesn't go negative (shouldn't happen but just in case)
-                batch_progress = max(0, batch_progress)
-                # Dot-based progress bar for this batch
-                bar_width = 20
-                progress_ratio = min(batch_progress / total_for_batch, 1.0)
-                dots = int(progress_ratio * bar_width)
-                spaces = bar_width - dots
-                progress_bar = "." * dots + " " * spaces
-                
-                print(f"\rUploading: [{progress_bar}] {batch_progress}/{total_for_batch} (Total: {current_progress}/{website_total}) (Batch {batch_number} of {batch_count})", end="")
+
+                display_progress_bar("Uploading", batch_progress, total_for_batch, 
+                    f"(Total: {current_progress}/{website_total}) (Batch {batch_number} of {batch_count})")
                 
                 # Check if progress changed
                 if current_progress != last_progress:
@@ -656,7 +664,7 @@ def main():
         logger.error(f"No image files found in '{cfg.photos_directory}'.")
         exit(1)
 
-    logger.info(f"Found {len(image_files)} image files.")
+    logger.debug(f"Found {len(image_files)} image files.")
     driver = setup_webdriver(cfg.headless)
     
     try:
