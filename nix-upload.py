@@ -137,9 +137,6 @@ def load_config(config_file='config.json'):
         logger.error(f"Failure loading config: {str(e)}")
         exit(1)
         
-import os
-import random
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -570,18 +567,12 @@ def find_playlist(driver, base_url, playlist_name):
 
 
 
-# import time
-# from selenium import webdriver
-# from selenium.webdriver.common.by import By
-# from selenium.webdriver.support.ui import WebDriverWait
-# from selenium.webdriver.support import expected_conditions as EC
 
 def delete_all_photos(driver, timeout=500):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import TimeoutException
-    import time
 
     try:
         logger.debug("Switching to main document...")
@@ -652,13 +643,7 @@ class invisibility_of_any_element:
     def __call__(self, driver):
         return all(EC.invisibility_of_element_located(locator)(driver) for locator in self.locators)
 
-import json
 
-
-import os
-import time
-import random
-import traceback
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
