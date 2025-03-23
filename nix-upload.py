@@ -15,6 +15,8 @@ import tempfile
 import atexit
 import shutil
 from PIL import Image
+from PIL import ImageDraw, ImageFont
+from PIL.ExifTags import TAGS, GPSTAGS
 
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
@@ -42,7 +44,7 @@ def cleanup_temp_files():
             logger.error(f"Failed to clean up temporary directory {temp_dir}: {str(e)}")
     
     # Clear the list after cleanup
-    temp_directories = []
+    # temp_directories = []
 
 # Register the cleanup function to be called when the program exits
 atexit.register(cleanup_temp_files)
@@ -71,14 +73,19 @@ def load_config(config_file='config.json'):
     
     DEFAULT_CONFIG = {
         'playlist_name': 'nix-upload',
-        'max_photos': 300,
+        'max_photos': 500,
         'base_url': 'https://app.nixplay.com',
         'max_file_size_mb': 3,
-        'batch_size': 10,
+        'batch_size': 100,
         'image_width': 1280,
         'image_height': 800,
         'log_level': 'INFO',
-        'headless': False,
+        'headless': True,
+        'caption': True,
+        'caption_position': 'bottom',
+        'date_format': '%Y-%m-%d %H:%M',
+        'font_size': 40,
+        'font_path': None
     }
     
     REQUIRED_KEYS = ['username', 'password', 'photos_directory']
@@ -151,7 +158,7 @@ def display_progress_bar(prefix, start_time, current, total, suffix="", bar_widt
 def end_progress_bar():
     print()
     
-def get_image_files(directory, max_file_size_mb, max_photos, target_width, target_height):
+def get_image_files(directory, max_file_size_mb, max_photos, target_width, target_height, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True):
     """Recursively get all image files from a directory, skipping folders with a .nonixplay file."""
     valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
     image_files = []
@@ -186,7 +193,18 @@ def get_image_files(directory, max_file_size_mb, max_photos, target_width, targe
         final_images = []
         start_time = time.time()
         for i, img_path in enumerate(selected_images):
-            processed_path = resize_image(img_path, temp_dir, target_width, target_height, max_file_size)
+            processed_path = image_resize_and_add_caption(
+                img_path, 
+                temp_dir, 
+                target_width, 
+                target_height, 
+                max_file_size,
+                date_format=date_format,
+                caption_position=caption_position,
+                font_size=font_size,
+                font_path=font_path,
+                caption=caption
+            )
             if processed_path:
                 final_images.append(processed_path)
             display_progress_bar("Resizing", start_time, i+1, max_photos)
@@ -199,12 +217,85 @@ def get_image_files(directory, max_file_size_mb, max_photos, target_width, targe
         logger.error(f"Directory '{directory}' not found.")
         exit(1)
     except Exception as e:
-        logger.error(f"get_image_files() Exception: {str(e)}")
+        logger.error(f"Error getting image files: {str(e)}")
         exit(1)
 
-def resize_image(image_path, temp_dir, target_width, target_height, max_file_size):
+def _convert_to_degrees(value):
+    """Convert decimal coordinates into degrees, minutes and seconds."""
+    d = float(value[0])
+    m = float(value[1])
+    s = float(value[2])
+    return d + (m / 60.0) + (s / 3600.0)
+
+def _get_gps_coordinates(img):
+    """Extract GPS coordinates from image EXIF data."""
+    try:
+        exif = img._getexif()
+        if not exif:
+            return None
+
+        # GPS tags
+        gps_lat = None
+        gps_lat_ref = None
+        gps_lon = None
+        gps_lon_ref = None
+
+        for tag_id in exif:
+            tag = TAGS.get(tag_id, tag_id)
+            data = exif.get(tag_id)
+            
+            if tag == 'GPSInfo':
+                for key in data.keys():
+                    sub_tag = GPSTAGS.get(key, key)
+                    if sub_tag == 'GPSLatitude':
+                        gps_lat = data[key]
+                    elif sub_tag == 'GPSLatitudeRef':
+                        gps_lat_ref = data[key]
+                    elif sub_tag == 'GPSLongitude':
+                        gps_lon = data[key]
+                    elif sub_tag == 'GPSLongitudeRef':
+                        gps_lon_ref = data[key]
+
+        if gps_lat and gps_lon:
+            lat = _convert_to_degrees(gps_lat)
+            lon = _convert_to_degrees(gps_lon)
+            
+            if gps_lat_ref != 'N':
+                lat = -lat
+            if gps_lon_ref != 'E':
+                lon = -lon
+                
+            return (lat, lon)
+    except Exception as e:
+        logger.debug(f"Failed to extract GPS coordinates: {str(e)}")
+    return None
+
+def _get_location_name(coordinates):
+    """Convert GPS coordinates to location name using reverse geocoding."""
+    try:
+        from geopy.geocoders import Nominatim
+        from geopy.exc import GeocoderTimedOut
+        
+        geolocator = Nominatim(user_agent="nix-upload")
+        location = geolocator.reverse(coordinates, language='en')
+        
+        if location and location.raw.get('address'):
+            # Try to get city name, fall back to other location components
+            address = location.raw['address']
+            city = address.get('city') or address.get('town') or address.get('village')
+            if city:
+                return city
+            return location.address.split(',')[0]  # Return first part of address if no city found
+    except GeocoderTimedOut:
+        logger.warning("Geocoding timed out")
+    except Exception as e:
+        logger.warning(f"Failed to get location name: {str(e)}")
+    return None
+
+def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True):
     """
     Resize image to fit the target dimensions and ensure it's under max_file_size.
+    Adds text overlay with date and location (from GPS data) if caption is True.
     Returns path to resized image or None if processing failed or file is too large.
     """
     try:
@@ -225,6 +316,84 @@ def resize_image(image_path, temp_dir, target_width, target_height, max_file_siz
             # Resize image
             resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
+            # Convert to RGB if necessary (for text overlay)
+            if resized_img.mode != 'RGB':
+                resized_img = resized_img.convert('RGB')
+            
+            # Only add text overlay if caption is True
+            if caption:
+                # Calculate text color based on image background
+                # Sample the background color from the bottom of the image
+                sample_height = int(new_height * 0.1)  # Sample 10% from bottom
+                sample_region = resized_img.crop((0, new_height - sample_height, new_width, new_height))
+                avg_color = tuple(map(int, sample_region.resize((1, 1)).getpixel((0, 0))))
+                
+                # Calculate luminance to determine text color
+                luminance = (0.299 * avg_color[0] + 0.587 * avg_color[1] + 0.114 * avg_color[2]) / 255
+                text_color = (0, 0, 0) if luminance > 0.5 else (255, 255, 255)  # Black or white text
+                
+                # Create a copy of the image for drawing
+                img_with_text = resized_img.copy()
+                
+                # Load font
+                if font_path and os.path.exists(font_path):
+                    font = ImageFont.truetype(font_path, font_size)
+                else:
+                    # Use default system font
+                    try:
+                        font = ImageFont.truetype("arial.ttf", font_size)
+                    except:
+                        font = ImageFont.load_default()
+                
+                draw = ImageDraw.Draw(img_with_text)
+                
+                # Get image creation date from EXIF data if available
+                try:
+                    exif = img._getexif()
+                    if exif and 36867 in exif:  # 36867 is DateTimeOriginal
+                        date_str = exif[36867]
+                        date_obj = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                    else:
+                        # Use file modification time as fallback
+                        date_obj = datetime.fromtimestamp(os.path.getmtime(image_path))
+                except:
+                    # Use file modification time as fallback
+                    date_obj = datetime.fromtimestamp(os.path.getmtime(image_path))
+                
+                # Format date string
+                date_text = date_obj.strftime(date_format)
+                
+                # Get location from GPS coordinates
+                location_text = None
+                coordinates = _get_gps_coordinates(img)
+                if coordinates:
+                    location_text = _get_location_name(coordinates)
+                
+                # Prepare text lines
+                text_lines = [date_text]
+                if location_text:
+                    text_lines.append(location_text)
+                
+                # Calculate text positions
+                if caption_position == "bottom":
+                    y_position = new_height - (len(text_lines) * font_size * 1.2) - 20  # 20px padding from bottom
+                else:  # top
+                    y_position = 20  # 20px padding from top
+                
+                # Draw text with outline for better visibility
+                outline_color = (0, 0, 0) if text_color == (255, 255, 255) else (255, 255, 255)
+                outline_width = 2
+                
+                for i, line in enumerate(text_lines):
+                    # Draw outline
+                    for dx in range(-outline_width, outline_width + 1):
+                        for dy in range(-outline_width, outline_width + 1):
+                            draw.text((10 + dx, y_position + (i * font_size * 1.2) + dy), line, font=font, fill=outline_color)
+                    # Draw main text
+                    draw.text((10, y_position + (i * font_size * 1.2)), line, font=font, fill=text_color)
+                
+                resized_img = img_with_text
+            
             # Create output path in temp directory
             img_filename = os.path.basename(image_path)
             output_path = os.path.join(temp_dir, img_filename)
@@ -241,11 +410,10 @@ def resize_image(image_path, temp_dir, target_width, target_height, max_file_siz
                 os.remove(output_path)  # Clean up the temporary file
                 return None
             
-            # logger.debug(f"Successfully resized {img_filename} to {new_width}x{new_height}")
             return output_path
     
     except Exception as e:
-        logger.warning(f"Failed to process image {image_path}: {str(e)}")
+        logger.warning(f"Error processing image {image_path}: {str(e)}")
         return None
 
 def setup_webdriver(headless):
@@ -713,7 +881,7 @@ def main():
         else:
             logger.debug(f"{key}: {value}")
 
-    image_files = get_image_files(cfg.photos_directory, cfg.max_file_size_mb, cfg.max_photos, cfg.image_width, cfg.image_height)
+    image_files = get_image_files(cfg.photos_directory, cfg.max_file_size_mb, cfg.max_photos, cfg.image_width, cfg.image_height, cfg.date_format, cfg.caption_position, cfg.font_size, cfg.font_path, cfg.caption)
     if not image_files:
         logger.error(f"No image files found in '{cfg.photos_directory}'.")
         exit(1)

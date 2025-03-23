@@ -3,12 +3,17 @@
     "password": "PASSWORD",
     "photos_directory": "PATH/TO/ROOT/OF/YOUR/PHOTOS/DIR",
     "playlist_name": "nix-upload",
-    "max_photos": 100,
+    "max_photos": 500,
     "base_url": "https://app.nixplay.com",
 	"max_file_size_mb": 3,
-	"batch_size": 10,
+	"batch_size": 100,
 	"image_width": 1280,
 	"image_height": 800,
     "log_level": "INFO",
-    "headless": true
+    "headless": true,
+    "caption": true,
+    "caption_position": "bottom",
+    "date_format": "%Y-%m-%d %H:%M",
+    "font_size": 40,
+    "font_path": null
 }
