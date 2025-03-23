@@ -375,10 +375,12 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                     text_lines.append(location_text)
                 
                 # Calculate text positions
+                caption_y_offset = 100
+                caption_x_offset = 100
                 if caption_position == "bottom":
-                    y_position = new_height - (len(text_lines) * font_size * 1.2) - 20  # 20px padding from bottom
+                    y_position = new_height - (len(text_lines) * font_size * 1.2) - caption_y_offset  
                 else:  # top
-                    y_position = 20  # 20px padding from top
+                    y_position = caption_y_offset  
                 
                 # Draw text with outline for better visibility
                 outline_color = (0, 0, 0) if text_color == (255, 255, 255) else (255, 255, 255)
@@ -388,9 +390,9 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                     # Draw outline
                     for dx in range(-outline_width, outline_width + 1):
                         for dy in range(-outline_width, outline_width + 1):
-                            draw.text((10 + dx, y_position + (i * font_size * 1.2) + dy), line, font=font, fill=outline_color)
+                            draw.text((caption_x_offset + dx, y_position + (i * font_size * 1.2) + dy), line, font=font, fill=outline_color)
                     # Draw main text
-                    draw.text((10, y_position + (i * font_size * 1.2)), line, font=font, fill=text_color)
+                    draw.text((caption_x_offset, y_position + (i * font_size * 1.2)), line, font=font, fill=text_color)
                 
                 resized_img = img_with_text
             
