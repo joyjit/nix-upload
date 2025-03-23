@@ -274,22 +274,48 @@ def _get_location_name(coordinates):
     """Convert GPS coordinates to location name using reverse geocoding."""
     try:
         from geopy.geocoders import Nominatim
-        from geopy.exc import GeocoderTimedOut
+        from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+        from requests.exceptions import RequestException
         
-        geolocator = Nominatim(user_agent="nix-upload")
-        location = geolocator.reverse(coordinates, language='en')
+        # Initialize geocoder with a longer timeout and custom user agent
+        geolocator = Nominatim(
+            user_agent="nix-upload/1.0",
+            timeout=10  # Increase timeout to 10 seconds
+        )
         
-        if location and location.raw.get('address'):
-            # Try to get city name, fall back to other location components
-            address = location.raw['address']
-            city = address.get('city') or address.get('town') or address.get('village')
-            if city:
-                return city
-            return location.address.split(',')[0]  # Return first part of address if no city found
-    except GeocoderTimedOut:
-        logger.warning("Geocoding timed out")
+        try:
+            location = geolocator.reverse(coordinates, language='en')
+            
+            if location and location.raw.get('address'):
+                # Try to get city name, fall back to other location components
+                address = location.raw['address']
+                city = address.get('city') or address.get('town') or address.get('village')
+                if city:
+                    return city
+                return location.address.split(',')[0]  # Return first part of address if no city found
+        except GeocoderTimedOut as e:
+            logger.warning(f"Geocoding timed out: {str(e)}")
+            # Fallback to coordinates if geocoding fails
+            lat, lon = coordinates
+            return f"{lat:.4f}, {lon:.4f}"
+        except GeocoderUnavailable as e:
+            logger.warning(f"Geocoding service unavailable: {str(e)}")
+            # Fallback to coordinates if geocoding fails
+            lat, lon = coordinates
+            return f"{lat:.4f}, {lon:.4f}"
+        except RequestException as e:
+            logger.warning(f"Network request failed: {str(e)}")
+            # Fallback to coordinates if geocoding fails
+            lat, lon = coordinates
+            return f"{lat:.4f}, {lon:.4f}"
+            
     except Exception as e:
         logger.warning(f"Failed to get location name: {str(e)}")
+        # Fallback to coordinates if any other error occurs
+        lat, lon = coordinates
+        return f"{lat:.4f}, {lon:.4f}"
+    
+    # Final fallback if all else fails
     return None
 
 def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True):
