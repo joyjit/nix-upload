@@ -14,8 +14,7 @@ import logging
 import tempfile
 import atexit
 import shutil
-from PIL import Image
-from PIL import ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 from PIL.ExifTags import TAGS, GPSTAGS
 
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
