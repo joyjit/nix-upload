@@ -49,9 +49,9 @@ The script uses a `config.json` file for configuration. Here are all available p
 - `photos_directory`: Path to the directory containing your photos
 
 ### Optional Parameters
+- `base_url`: Nixplay website URL (default: "https://app.nixplay.com")
 - `playlist_name`: Name of the Nixplay playlist to upload to (default: "nix-upload")
 - `max_photos`: Maximum number of photos to upload (default: 500)
-- `base_url`: Nixplay website URL (default: "https://app.nixplay.com")
 - `max_file_size_mb`: Maximum file size for each photo in MB (default: 3)
 - `batch_size`: Number of photos to upload in each batch (default: 100)
 - `image_width`: Target width for resized images (default: 1280)
@@ -90,9 +90,9 @@ Common date format options for the `date_format` parameter:
     "username": "USERNAME",
     "password": "PASSWORD",
     "photos_directory": "PATH/TO/ROOT/OF/YOUR/PHOTOS/DIR",
+    "base_url": "https://app.nixplay.com",
     "playlist_name": "nix-upload",
     "max_photos": 500,
-    "base_url": "https://app.nixplay.com",
     "max_file_size_mb": 3,
     "batch_size": 100,
     "image_width": 1280,

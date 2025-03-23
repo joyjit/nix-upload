@@ -72,9 +72,9 @@ def load_config(config_file='config.json'):
     """Load configuration from JSON file with default values."""
     
     DEFAULT_CONFIG = {
+        'base_url': 'https://app.nixplay.com',
         'playlist_name': 'nix-upload',
         'max_photos': 500,
-        'base_url': 'https://app.nixplay.com',
         'max_file_size_mb': 3,
         'batch_size': 100,
         'image_width': 1280,
