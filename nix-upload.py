@@ -84,7 +84,7 @@ def load_config(config_file='config.json'):
         'caption': True,
         'caption_position': 'bottom',
         'date_format': '%Y-%m-%d %H:%M',
-        'font_size': 40,
+        'font_size': 50,
         'font_path': None
     }
     

@@ -102,7 +102,7 @@ Common date format options for the `date_format` parameter:
     "caption": true,
     "caption_position": "bottom",
     "date_format": "%b %Y",
-    "font_size": 40,
+    "font_size": 50,
     "font_path": "C:/Windows/Fonts/arial.ttf"
 }
 ```
