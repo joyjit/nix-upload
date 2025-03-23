@@ -38,7 +38,7 @@ def cleanup_temp_files():
     for temp_dir in temp_directories:
         try:
             if os.path.exists(temp_dir):
-                logger.info(f"Cleaning up temporary directory: {temp_dir}")
+                logger.debug(f"Cleaning up temporary directory: {temp_dir}")
                 shutil.rmtree(temp_dir)
         except Exception as e:
             logger.error(f"Failed to clean up temporary directory {temp_dir}: {str(e)}")
