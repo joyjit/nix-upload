@@ -912,7 +912,7 @@ def main():
         
         
         if not delete_all_from_playlist(driver,  cfg.base_url, cfg.playlist_name):
-            logger.error("Failed to delete existing photos. Continuing with upload...")
+            logger.warning("Failed to delete existing photos. Continuing with upload...")
         
         if not upload_photos(driver, image_files, cfg.batch_size):
             logger.error("Failed to upload photos.")
