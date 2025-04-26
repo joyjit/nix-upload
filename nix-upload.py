@@ -568,11 +568,15 @@ def find_playlist(driver, base_url, playlist_name):
 
 
 
-def delete_all_photos(driver, timeout=500):
+def delete_all_from_playlist(driver, base_url, playlist_name, timeout=500):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import TimeoutException
+    
+    if not find_playlist(driver, base_url, playlist_name):
+        logger.error(f"Could not find playlist '{cfg.playlist_name}'. Exiting.")
+        return False
 
     try:
         logger.debug("Switching to main document...")
@@ -623,12 +627,12 @@ def delete_all_photos(driver, timeout=500):
             return True
 
     except TimeoutException as e:
-        logger.error(f"delete_all_photos() TimeoutException: {str(e)}")
+        logger.error(f"delete_all_from_playlist() TimeoutException: {str(e)}")
         save_debug_snapshot(driver, "timeout_exception")
         return False
 
     except Exception as e:
-        logger.error(f"delete_all_photos() Exception: {str(e)}")
+        logger.error(f"delete_all_from_playlist() Exception: {str(e)}")
         save_debug_snapshot(driver, "unexpected_exception")
         return False
 
@@ -906,11 +910,8 @@ def main():
             logger.error("Login failed. Exiting.")
             exit(1)
         
-        if not find_playlist(driver, cfg.base_url, cfg.playlist_name):
-            logger.error(f"Could not find playlist '{cfg.playlist_name}'. Exiting.")
-            exit(1)
         
-        if not delete_all_photos(driver):
+        if not delete_all_from_playlist(driver,  cfg.base_url, cfg.playlist_name):
             logger.error("Failed to delete existing photos. Continuing with upload...")
         
         if not upload_photos(driver, image_files, cfg.batch_size):
