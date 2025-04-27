@@ -4,6 +4,7 @@
     "photos_directory": "PATH/TO/ROOT/OF/YOUR/PHOTOS/DIR",
     "base_url": "https://app.nixplay.com",
     "playlist_name": "nix-upload",
+    "delete_my_uploads": false,
     "max_photos": 500,
 	"max_file_size_mb": 3,
 	"batch_size": 100,

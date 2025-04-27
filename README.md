@@ -1,6 +1,11 @@
 # nix-upload
 A Python utility that automatically uploads photos from your local directory (recursively) to Nixplay digital photo frames. The tool supports batch processing, image resizing, and text overlay with date and location information.
 
+> [!NOTE]
+> This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos
+> if you set the "delete_my_uploads" configuration value to true,
+
+
 ## How to Install
 1. **Prerequisites**
    - Python 3.8 or higher
@@ -51,6 +56,7 @@ The script uses a `config.json` file for configuration. Here are all available p
 ### Optional Parameters
 - `base_url`: Nixplay website URL (default: "https://app.nixplay.com")
 - `playlist_name`: Name of the Nixplay playlist to upload to (default: "nix-upload")
+- `delete_my_uploads`: Whether to delete your "My uploads" album every time (default: false)
 - `max_photos`: Maximum number of photos to upload (default: 500)
 - `max_file_size_mb`: Maximum file size for each photo in MB (default: 3)
 - `batch_size`: Number of photos to upload in each batch (default: 100)

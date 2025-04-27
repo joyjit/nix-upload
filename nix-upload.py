@@ -73,6 +73,7 @@ def load_config(config_file='config.json'):
     DEFAULT_CONFIG = {
         'base_url': 'https://app.nixplay.com',
         'playlist_name': 'nix-upload',
+        'delete_my_uploads': True,
         'max_photos': 500,
         'max_file_size_mb': 3,
         'batch_size': 100,
@@ -565,19 +566,86 @@ def find_playlist(driver, base_url, playlist_name):
         save_debug_snapshot(driver, "find_playlist_error")
         return False
 
+def delete_my_uploads(driver, base_url, timeout=30):
+    """
+    Delete the 'My Uploads' album from the albums page.
+    
+    Args:
+        driver: Selenium WebDriver instance
+        base_url: Base URL of the Nixplay website
+        timeout: Maximum time to wait for elements (seconds)
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        logger.info("Navigating to albums page to delete 'My Uploads'...")
+        albums_url = f"{base_url}/#/albums/nixplay"
+        driver.get(albums_url)
+        save_debug_snapshot(driver, "albums_page_loaded")
+        
+        wait = WebDriverWait(driver, timeout)
+        
+        # Wait for the page to load
+        logger.debug("Waiting for albums page to load...")
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.album-info")))
+        
+        # Find the "My Uploads" album by looking for the name span
+        logger.debug("Looking for 'My Uploads' album...")
+        my_uploads_name = wait.until(
+            EC.presence_of_element_located((By.XPATH, '//span[@class="name" and @title="My Uploads"]'))
+        )
+        
+        # Navigate up to find the album container
+        album_container = my_uploads_name.find_element(By.XPATH, './ancestor::div[contains(@class, "album")]')
+        
+        # Find the trash icon within this container
+        logger.debug("Looking for delete button...")
+        delete_button = album_container.find_element(By.XPATH, './/div[contains(@class, "album-delete fa fa-trash-o")]')
+        
+        # Click the delete button
+        logger.debug("Clicking delete button...")
+        delete_button.click()
+        time.sleep(5) # arbitrary delay before clicking "Yes"
+        save_debug_snapshot(driver, "after_delete_button_clicked")
+        
+        # Wait for confirmation dialog
+        logger.debug("Waiting for confirmation dialog...")
+        wait.until(EC.presence_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete Album"]')))
+        save_debug_snapshot(driver, "delete_confirmation_dialog")
+        
+        # Find and click the "Yes" button
+        logger.debug("Looking for 'Yes' button...")
+        yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//div[@class="nix-modal-buttons"]//button[text()="Yes"]')))
+        
+        logger.debug("Clicking 'Yes' button...")
+        yes_button.click()
+        
+        # Wait for the dialog to disappear
+        logger.debug("Waiting for dialog to close...")
+        wait.until(EC.invisibility_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete Album"]')))
+        
+        logger.info("Successfully deleted 'My Uploads' album")
+        return True
+        
+    except TimeoutException as e:
+        logger.error(f"Timeout while trying to delete 'My Uploads' album: {str(e)}")
+        save_debug_snapshot(driver, "delete_uploads_timeout")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to delete 'My Uploads' album: {str(e)}")
+        traceback.print_exc()
+        save_debug_snapshot(driver, "delete_uploads_error")
+        return False
 
 
 
-def delete_all_from_playlist(driver, base_url, playlist_name, timeout=500):
+def delete_all_from_playlist(driver, timeout=500):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import TimeoutException
     
-    if not find_playlist(driver, base_url, playlist_name):
-        logger.error(f"Could not find playlist '{cfg.playlist_name}'. Exiting.")
-        return False
-
     try:
         logger.debug("Switching to main document...")
         driver.switch_to.default_content()
@@ -809,6 +877,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
             # Check for stalled progress
             if time.time() - last_progress_change_time > stall_timeout:
                 logger.info(f"\nProgress stalled for {stall_timeout}s - assuming upload complete")
+                save_debug_snapshot(driver, f"porgress_stalled_batch_number_{batch_number}_of_{batch_count}")
                 break
                 
         except NoSuchElementException:
@@ -910,8 +979,17 @@ def main():
             logger.error("Login failed. Exiting.")
             exit(1)
         
+        if(cfg.delete_my_uploads == True):
+            if not delete_my_uploads(driver, cfg.base_url):
+                logger.warning("Failed to delete 'My Uploads'. Continuing with upload...")
         
-        if not delete_all_from_playlist(driver,  cfg.base_url, cfg.playlist_name):
+        # Navigate to playlist
+        if not find_playlist(driver, cfg.base_url, cfg.playlist_name):
+            logger.error(f"Could not find playlist '{cfg.playlist_name}'. Exiting.")
+            return False
+ 
+#        if(cfg.delete_my_uploads == False):
+        if not delete_all_from_playlist(driver):
             logger.warning("Failed to delete existing photos. Continuing with upload...")
         
         if not upload_photos(driver, image_files, cfg.batch_size):
