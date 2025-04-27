@@ -1,9 +1,8 @@
 # nix-upload
 A Python utility that automatically uploads photos from your local directory (recursively) to Nixplay digital photo frames. The tool supports batch processing, image resizing, and text overlay with date and location information.
 
-> [!NOTE]
-> This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos
-> if you set the "delete_my_uploads" configuration value to true,
+>[!CAUTION]
+This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if you set the **delete_my_uploads** configuration value to **true**,
 
 
 ## How to Install
@@ -39,9 +38,9 @@ A Python utility that automatically uploads photos from your local directory (re
      - `password`: Your Nixplay account password
      - `photos_directory`: Path to your photos directory
 
-5. **Verify Installation**
+5. **Run**
    ```bash
-   python nix-upload.py --help
+   python nix-upload.py
    ```
 
 ## Configuration Parameters
@@ -98,6 +97,7 @@ Common date format options for the `date_format` parameter:
     "photos_directory": "PATH/TO/ROOT/OF/YOUR/PHOTOS/DIR",
     "base_url": "https://app.nixplay.com",
     "playlist_name": "nix-upload",
+    "delete_my_uploads": true,
     "max_photos": 500,
     "max_file_size_mb": 3,
     "batch_size": 100,
@@ -119,6 +119,8 @@ Common date format options for the `date_format` parameter:
 
 ## NOTE
 The script will first DELETE ALL PHOTOS from the specified playlist. Then it will upload all the new photos to the same playlist.
+>[!CAUTION]
+This script will DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if you set the **delete_my_uploads** configuration value to **true**,
 
 ## Known issues:
 - I dont know why this warning shows, but it seems to be a benign message
