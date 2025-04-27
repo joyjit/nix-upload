@@ -141,7 +141,7 @@ def load_config(config_file='config.json'):
 
 logger = logging.getLogger(__name__)
 
-def display_progress_bar(prefix, start_time, current, total, suffix="", bar_width=50):
+def display_progress_bar(prefix, start_time, timeout, current, total, suffix="", bar_width=50):
     """Displays a dot-based progress bar in the console."""
     
    # Make sure current doesn't go negative (shouldn't happen but just in case)
@@ -150,7 +150,10 @@ def display_progress_bar(prefix, start_time, current, total, suffix="", bar_widt
     dots = int(progress_ratio * bar_width)
     spaces = bar_width - dots
     progress_bar = "." * dots + " " * spaces
-    print(f"\r{prefix}: [{progress_bar}] ({current}/{total}) {round(time.time() - start_time)}s {suffix}", end="", flush=True)
+    if(timeout <= 0):
+        print(f"\r{prefix}: [{progress_bar}] ({current}/{total}) {round(time.time() - start_time)}s {suffix}", end="", flush=True)
+    else:
+        print(f"\r{prefix}: [{progress_bar}] ({current}/{total}) {round(time.time() - start_time)}s/{timeout}s {suffix}", end="", flush=True)
     
 def end_progress_bar():
     print()
@@ -204,7 +207,7 @@ def get_image_files(directory, max_file_size_mb, max_photos, target_width, targe
             )
             if processed_path:
                 final_images.append(processed_path)
-            display_progress_bar("Resizing", start_time, i+1, max_photos)
+            display_progress_bar("Resizing", start_time, 0, i+1, max_photos)
         end_progress_bar()
 
         logger.debug(f"Resized {len(final_images)} of {len(selected_images)} selected images.")
@@ -858,7 +861,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                 batch_start_count = (batch_number-1)*total_for_batch+1
                 batch_progress = current_progress - batch_start_count + 1
 
-                display_progress_bar("Uploading", start_time, batch_progress, total_for_batch, 
+                display_progress_bar("Uploading", start_time, max_upload_time, batch_progress, total_for_batch, 
                     f"(Total: {current_progress}/{website_total}) (Batch {batch_number} of {batch_count})")
                 
                 # Check if progress changed
@@ -877,7 +880,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
             # Check for stalled progress
             if time.time() - last_progress_change_time > stall_timeout:
                 logger.info(f"\nProgress stalled for {stall_timeout}s - assuming upload complete")
-                save_debug_snapshot(driver, f"porgress_stalled_batch_number_{batch_number}_of_{batch_count}")
+                save_debug_snapshot(driver, f"progress_stalled_batch_number_{batch_number}_of_{batch_count}")
                 break
                 
         except NoSuchElementException:
