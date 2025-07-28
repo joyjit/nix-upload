@@ -540,6 +540,11 @@ def find_playlist(driver, base_url, playlist_name):
 
         wait = WebDriverWait(driver, 30)
 
+        # Add a wait for the modal background to disappear
+        logger.debug("Waiting for any modal background to disappear...")
+        wait.until(EC.invisibility_of_element_located((By.CSS_SELECTOR, ".nix-modal-bg")))
+        logger.debug("Modal background is gone.")
+
         # Find the playlist's name element.
         playlist_name_element = wait.until(
             EC.presence_of_element_located((By.XPATH, f'//span[@class="name" and @title="{playlist_name}"]'))
@@ -557,7 +562,9 @@ def find_playlist(driver, base_url, playlist_name):
             EC.element_to_be_clickable((By.XPATH, f'//div[@id="playlist-{playlist_index}"]//div[@class="playlist-draggable-wrapper"]'))
         )
 
-        playlist_element.click()
+        # This often bypasses ElementClickInterceptedException when standard .click() fails due to dynamic overlays.
+        driver.execute_script("arguments[0].click();", playlist_element)
+        logger.debug("Clicked playlist element using JavaScript.")
 
         wait.until(EC.url_contains("/playlist/"))
         save_debug_snapshot(driver, f"playlist_selected_{playlist_name}")
@@ -614,7 +621,7 @@ def delete_my_uploads(driver, base_url, timeout=30):
         
         # Wait for confirmation dialog
         logger.debug("Waiting for confirmation dialog...")
-        wait.until(EC.presence_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete Album"]')))
+        wait.until(EC.presence_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete legacy album"]')))
         save_debug_snapshot(driver, "delete_confirmation_dialog")
         
         # Find and click the "Yes" button
@@ -690,11 +697,25 @@ def delete_all_from_playlist(driver, timeout=500):
             logger.info("Clicked 'OK' on No Photo modal.")
             return True
         else:
-            logger.debug("Confirmation modal detected (not 'No Photo'). Proceeding to click 'Yes'.")
-            save_debug_snapshot(driver, "before_clicking_yes")
-            yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Yes']")))
+            logger.debug("Confirmation modal detected (not 'No Photo'). Proceeding to click 'OK'.")
+            save_debug_snapshot(driver, "before_clicking_ok")
+            yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
             yes_button.click()
-            logger.info("Clicked 'Yes' to confirm deletion.")
+            logger.info("Clicked 'OK' to confirm deletion.")
+            return True
+        if modal_text == "No Photo in Playlist":
+            logger.debug("'No Photo in Playlist' modal detected.")
+            ok_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
+            save_debug_snapshot(driver, "before_clicking_ok")
+            ok_button.click()
+            logger.info("Clicked 'OK' on No Photo modal.")
+            return True
+        else:
+            logger.debug("Confirmation modal detected (not 'No Photo'). Proceeding to click 'OK'.")
+            save_debug_snapshot(driver, "before_clicking_ok")
+            yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
+            yes_button.click()
+            logger.info("Clicked 'OK' to confirm deletion.")
             return True
 
     except TimeoutException as e:
