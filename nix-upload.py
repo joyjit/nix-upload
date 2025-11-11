@@ -661,22 +661,49 @@ def delete_all_from_playlist(driver, timeout=500):
         driver.switch_to.default_content()
         wait = WebDriverWait(driver, timeout)
 
+        # Wait for any modal background to disappear before proceeding
+        logger.debug("Waiting for any modal background to disappear...")
+        wait.until(EC.invisibility_of_element_located((By.CSS_SELECTOR, ".nix-modal-bg")))
+        logger.debug("Modal background is gone.")
 
         # Step 2: Open Actions dropdown
-        logger.debug("Locating and clicking Actions button...")
-        actions_button = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'dropdown-toggle') and contains(@class, 'btn-gray')]"))
+        logger.debug("Locating Actions button container...")
+        # Find the Actions container div (the one with dropdown-hover class)
+        actions_container_div = wait.until(
+            EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'nix-modal-playlist-actions') and contains(@class, 'dropdown-hover')]"))
         )
-        actions_button.click()
+        logger.debug("Found Actions container div.")
+        
+        # Find the button inside the container
+        actions_button = actions_container_div.find_element(By.XPATH, ".//button[contains(@class, 'dropdown-toggle') and contains(@class, 'btn-gray')]")
+        logger.debug("Found Actions button.")
+        
+        # Hover over the container div to trigger the dropdown (since it's dropdown-hover)
+        from selenium.webdriver.common.action_chains import ActionChains
+        action_chains = ActionChains(driver)
+        action_chains.move_to_element(actions_container_div).perform()
+        logger.debug("Hovered over Actions container.")
+        
+        # Also click the button as a backup
+        driver.execute_script("arguments[0].click();", actions_button)
         logger.debug("Clicked Actions button.")
         save_debug_snapshot(driver, "after_actions_clicked")
+        
+        # Wait a moment for dropdown to appear
+        time.sleep(2)
+        
+        # Wait for the specific dropdown menu (the one with action-delete-all links)
+        logger.debug("Waiting for dropdown menu to appear...")
+        wait.until(EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'nix-modal-playlist-actions')]//ul[contains(@class, 'dropdown-menu')]//a[contains(@class, 'action-delete-all')]")))
+        logger.debug("Dropdown menu is visible.")
 
         # Step 3: Click "Permanent delete all photos"
-        logger.debug("Clicking 'Permanent delete all photos'...")
+        logger.debug("Looking for 'Permanent delete all photos' link...")
         delete_all_perm = wait.until(
             EC.element_to_be_clickable((By.XPATH, "//a[contains(@ng-click, 'deleteAllSlides') and contains(@ng-click, 'delete')]"))
         )
-        delete_all_perm.click()
+        logger.debug("Found 'Permanent delete all photos' link, clicking...")
+        driver.execute_script("arguments[0].click();", delete_all_perm)
         logger.debug("Clicked 'Permanent delete all photos'.")
         save_debug_snapshot(driver, "after_delete_all_clicked")
 
@@ -689,33 +716,36 @@ def delete_all_from_playlist(driver, timeout=500):
         logger.debug(f"Modal title detected: '{modal_text}'")
         save_debug_snapshot(driver, "modal_detected")
 
-        if modal_text == "No Photo in Playlist":
-            logger.debug("'No Photo in Playlist' modal detected.")
-            ok_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
-            save_debug_snapshot(driver, "before_clicking_ok")
-            ok_button.click()
-            logger.info("Clicked 'OK' on No Photo modal.")
+        if modal_text == "No Photo in Playlist" or modal_text == "No Photo in album":
+            logger.debug(f"'No Photo' modal detected: '{modal_text}'.")
+            # Try to find OK button first, then Yes button as fallback
+            try:
+                ok_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
+                save_debug_snapshot(driver, "before_clicking_ok")
+                driver.execute_script("arguments[0].click();", ok_button)
+                logger.info("Clicked 'OK' on No Photo modal.")
+            except TimeoutException:
+                # Fallback to Yes button
+                yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Yes']")))
+                save_debug_snapshot(driver, "before_clicking_yes")
+                driver.execute_script("arguments[0].click();", yes_button)
+                logger.info("Clicked 'Yes' on No Photo modal.")
             return True
         else:
-            logger.debug("Confirmation modal detected (not 'No Photo'). Proceeding to click 'OK'.")
-            save_debug_snapshot(driver, "before_clicking_ok")
-            yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
-            yes_button.click()
-            logger.info("Clicked 'OK' to confirm deletion.")
-            return True
-        if modal_text == "No Photo in Playlist":
-            logger.debug("'No Photo in Playlist' modal detected.")
-            ok_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
-            save_debug_snapshot(driver, "before_clicking_ok")
-            ok_button.click()
-            logger.info("Clicked 'OK' on No Photo modal.")
-            return True
-        else:
-            logger.debug("Confirmation modal detected (not 'No Photo'). Proceeding to click 'OK'.")
-            save_debug_snapshot(driver, "before_clicking_ok")
-            yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']")))
-            yes_button.click()
-            logger.info("Clicked 'OK' to confirm deletion.")
+            logger.debug(f"Confirmation modal detected: '{modal_text}'. Proceeding to click 'Yes'.")
+            save_debug_snapshot(driver, "before_clicking_yes")
+            # Look for Yes button in the modal buttons container
+            yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@class='nix-modal-buttons']//button[normalize-space()='Yes']")))
+            driver.execute_script("arguments[0].click();", yes_button)
+            logger.info("Clicked 'Yes' to confirm deletion.")
+            
+            # Wait for modal to close
+            try:
+                wait.until(EC.invisibility_of_element_located((By.CSS_SELECTOR, ".nix-modal-bg")))
+                logger.debug("Modal closed successfully.")
+            except TimeoutException:
+                logger.warning("Modal may not have closed, but continuing...")
+            
             return True
 
     except TimeoutException as e:
