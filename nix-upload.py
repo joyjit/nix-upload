@@ -610,32 +610,34 @@ def delete_my_uploads(driver, base_url, timeout=30):
         album_container = my_uploads_name.find_element(By.XPATH, './ancestor::div[contains(@class, "album")]')
         
         # Find the trash icon within this container
-        logger.debug("Looking for delete button...")
+        logger.debug("Found 'My Uploads'. Looking for delete button...")
         delete_button = album_container.find_element(By.XPATH, './/div[contains(@class, "album-delete fa fa-trash-o")]')
+        save_debug_snapshot(driver, "found_my_uploads_delete_button")
         
         # Click the delete button
-        logger.debug("Clicking delete button...")
+        logger.debug("'My Uploads'.Clicking delete button...")
         delete_button.click()
         time.sleep(5) # arbitrary delay before clicking "Yes"
-        save_debug_snapshot(driver, "after_delete_button_clicked")
+        save_debug_snapshot(driver, "after_my_uploads_delete_button_clicked")
         
         # Wait for confirmation dialog
-        logger.debug("Waiting for confirmation dialog...")
+        logger.debug("Waiting for 'My Uploads'Delete legacy album' confirmation dialog...")
         wait.until(EC.presence_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete legacy album"]')))
-        save_debug_snapshot(driver, "delete_confirmation_dialog")
+        save_debug_snapshot(driver, "found_delete_legacy_album_confirmation_dialog")
         
         # Find and click the "Yes" button
         logger.debug("Looking for 'Yes' button...")
         yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//div[@class="nix-modal-buttons"]//button[text()="Yes"]')))
-        
+        save_debug_snapshot(driver, "delete_my_uploads_legacy_album_confirmation_dialog_yes_button")
         logger.debug("Clicking 'Yes' button...")
         yes_button.click()
         
         # Wait for the dialog to disappear
-        logger.debug("Waiting for dialog to close...")
-        wait.until(EC.invisibility_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete Album"]')))
+        logger.debug("Waiting for 'My Uploads'Delete legacy album' dialog to close...")
+        wait.until(EC.invisibility_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete legacy album"]')))
         
         logger.info("Successfully deleted 'My Uploads' album")
+        save_debug_snapshot(driver, "after_delete_my_uploads_album")
         return True
         
     except TimeoutException as e:
