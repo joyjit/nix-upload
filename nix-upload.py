@@ -2,6 +2,7 @@ import os
 import random
 import time
 import json
+import argparse
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -854,6 +855,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
     
     logger.debug("Monitoring batch upload progress...")
     last_progress = 0
+    final_progress = 0  # Track the final progress count
     last_progress_change_time = time.time()
     stall_timeout = min(200, len(batch))
     max_upload_time = max(300, 2 * len(batch)*batch_number)
@@ -903,7 +905,16 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
         # Check for absolute timeout
         if time.time() - start_time > max_upload_time:
             save_debug_snapshot(driver, f"maximum_upload_time_{batch_number}")
-            logger.info(f"\nMaximum upload time ({max_upload_time}s) reached. Assuming complete.")
+            # Try to get final progress before breaking
+            try:
+                upload_text_elem = driver.find_element(By.XPATH, upload_text_xpath)
+                text = upload_text_elem.text.strip()
+                if " of " in text:
+                    parts = text.split(" of ")
+                    final_progress = int(parts[0])
+            except:
+                pass  # If we can't get it, use the last known value
+            logger.info(f"\nMaximum upload time ({max_upload_time}s) reached. Final progress: {final_progress}/{batch_end_count}")
             break
             
         time.sleep(2)
@@ -924,6 +935,9 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                 pass  # Progress couldn't be parsed
                 
             if current_progress > 0:
+                # Update final_progress to track the latest count
+                final_progress = current_progress
+                
                 # Calculate the progress relative to this batch
                 total_for_batch = len(batch)
                     
@@ -948,12 +962,22 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                 
             # Check for stalled progress
             if time.time() - last_progress_change_time > stall_timeout:
-                logger.info(f"\nProgress stalled for {stall_timeout}s - assuming upload complete")
+                logger.info(f"\nProgress stalled for {stall_timeout}s - checking completion status")
                 save_debug_snapshot(driver, f"progress_stalled_batch_number_{batch_number}_of_{batch_count}")
                 break
                 
         except NoSuchElementException:
-            # Progress element has disappeared
+            # Progress element has disappeared - try to get final count one more time
+            try:
+                # Wait a moment and try to read the final count
+                time.sleep(2)
+                upload_text_elem = driver.find_element(By.XPATH, upload_text_xpath)
+                text = upload_text_elem.text.strip()
+                if " of " in text:
+                    parts = text.split(" of ")
+                    final_progress = int(parts[0])
+            except:
+                pass  # If we can't get it, use the last known value
             logger.info("\nUpload complete - progress indicator disappeared. Continuing")
             break
         except Exception as e:
@@ -961,7 +985,18 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
             # Don't update the last_progress_change_time on errors
     
     print(f"\r")
-    logger.debug(f"Batch {batch_number} upload complete.")
+    
+    # Verify that all files were uploaded successfully
+    if final_progress > 0 and final_progress < batch_end_count:
+        missing_count = batch_end_count - final_progress
+        logger.warning(f"⚠️  WARNING: Batch {batch_number} incomplete! Only {final_progress}/{batch_end_count} files uploaded. {missing_count} file(s) failed to upload.")
+        logger.warning(f"This may indicate upload failures. Check the debug snapshots for details.")
+        # Still return True to continue with other batches, but log the issue
+    elif final_progress == 0:
+        logger.warning(f"⚠️  WARNING: Could not determine final upload count for batch {batch_number}. Upload may have failed.")
+    else:
+        logger.debug(f"Batch {batch_number} upload complete: {final_progress}/{batch_end_count} files uploaded successfully.")
+    
     return True
 
 def upload_photos(driver, selected_images, batch_size):
@@ -1026,10 +1061,17 @@ from types import SimpleNamespace
         
 def main():
     """Main function to orchestrate the Nixplay photo upload process."""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Upload photos to Nixplay')
+    parser.add_argument('-c', '--config', 
+                        default='config.json',
+                        help='Path to configuration file (default: config.json)')
+    args = parser.parse_args()
+    
     # Set up file logging first so all logs are captured
     setup_file_logging()
     
-    config = load_config()
+    config = load_config(args.config)
     
     # Convert dictionary to an object with attributes
     cfg = SimpleNamespace(**config)
