@@ -28,6 +28,21 @@ logger.addHandler(handler)
 # Set an initial level - this will be overridden by config if available
 logger.setLevel(logging.INFO)
 
+# Global variable to store log file path
+log_file_path = None
+
+def setup_file_logging():
+    """Set up file logging with a timestamped log file."""
+    global log_file_path
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    os.makedirs("debug", exist_ok=True)
+    log_file_path = os.path.join("debug", f"{timestamp}_nix_upload.log")
+    
+    file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    logger.info(f"Logging to file: {log_file_path}")
+
 # Global variable to keep track of temporary directories
 temp_directories = []
 
@@ -630,11 +645,12 @@ def delete_my_uploads(driver, base_url, timeout=30):
         yes_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//div[@class="nix-modal-buttons"]//button[text()="Yes"]')))
         save_debug_snapshot(driver, "delete_my_uploads_legacy_album_confirmation_dialog_yes_button")
         logger.debug("Clicking 'Yes' button...")
-        yes_button.click()
+        # Use JavaScript click to ensure AngularJS ng-click handler is triggered
+        driver.execute_script("arguments[0].click();", yes_button)
         
-        # Wait for the dialog to disappear
+        # Wait for the dialog to disappear - wait for modal background to disappear (more reliable than title text)
         logger.debug("Waiting for 'My Uploads'Delete legacy album' dialog to close...")
-        wait.until(EC.invisibility_of_element_located((By.XPATH, '//span[@class="nix-modal-title-text" and text()="Delete legacy album"]')))
+        wait.until(EC.invisibility_of_element_located((By.CSS_SELECTOR, ".nix-modal-bg")))
         
         logger.info("Successfully deleted 'My Uploads' album")
         save_debug_snapshot(driver, "after_delete_my_uploads_album")
@@ -1010,6 +1026,9 @@ from types import SimpleNamespace
         
 def main():
     """Main function to orchestrate the Nixplay photo upload process."""
+    # Set up file logging first so all logs are captured
+    setup_file_logging()
+    
     config = load_config()
     
     # Convert dictionary to an object with attributes
