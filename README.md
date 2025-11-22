@@ -42,6 +42,11 @@ This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if yo
    ```bash
    python nix-upload.py
    ```
+   
+   You can also specify a custom configuration file using the `--config` (or `-c`) option:
+   ```bash
+   python nix-upload.py --config my-custom-config.json
+   ```
 
 ## Configuration Parameters
 
@@ -116,6 +121,7 @@ Common date format options for the `date_format` parameter:
 ## To run:
 1. open a command shell in the "nix-upload" directory on your computer
 2. Run "python nix-upload.py"
+   - Optionally specify a custom config file: "python nix-upload.py --config my-config.json"
 
 ## NOTE
 The script will first DELETE ALL PHOTOS from the specified playlist. Then it will upload all the new photos to the same playlist.
