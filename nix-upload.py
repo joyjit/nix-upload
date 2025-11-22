@@ -641,9 +641,9 @@ def delete_my_uploads(driver, base_url, timeout=30):
         delete_button = album_container.find_element(By.XPATH, './/div[contains(@class, "album-delete fa fa-trash-o")]')
         save_debug_snapshot(driver, "found_my_uploads_delete_button")
         
-        # Click the delete button
+        # Click the delete button using JavaScript to avoid ElementClickInterceptedException
         logger.debug("'My Uploads'.Clicking delete button...")
-        delete_button.click()
+        driver.execute_script("arguments[0].click();", delete_button)
         time.sleep(5) # arbitrary delay before clicking "Yes"
         save_debug_snapshot(driver, "after_my_uploads_delete_button_clicked")
         
@@ -892,15 +892,26 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                     driver.execute_script("arguments[0].click();", ok_button)
                     logger.info("Successfully clicked OK on server error modal")
                     
-                    # Optional: Log the rejected files
+                    # Log the rejected files with more detail
                     try:
+                        # Try multiple selectors to find rejected file information
                         rejected_files = driver.find_elements(By.XPATH, "//nix-modal//div[contains(text(), 'Server error')]")
+                        if not rejected_files:
+                            # Try alternative selector for file names
+                            rejected_files = driver.find_elements(By.XPATH, "//nix-modal//li[contains(@class, 'rejected')]")
                         if rejected_files:
-                            logger.warning(f"Server rejected {len(rejected_files)} files:")
+                            logger.warning(f"Server rejected {len(rejected_files)} file(s) in batch {batch_number}:")
                             for file_elem in rejected_files:
                                 logger.warning(f"  - {file_elem.text}")
+                        else:
+                            # Try to get modal body text as fallback
+                            modal_body = driver.find_elements(By.XPATH, "//nix-modal//div[contains(@class, 'nix-modal-body')]")
+                            if modal_body:
+                                logger.warning(f"Server error modal content: {modal_body[0].text}")
                     except Exception as e:
                         logger.warning(f"Failed to log rejected files: {e}")
+                        # Save snapshot for manual inspection
+                        save_debug_snapshot(driver, f"server_error_modal_content_batch_{batch_number}")
                     
                     # Wait briefly after dismissing the modal
                     time.sleep(2)
@@ -1002,13 +1013,16 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
         missing_count = batch_end_count - final_progress
         logger.warning(f"⚠️  WARNING: Batch {batch_number} incomplete! Only {final_progress}/{batch_end_count} files uploaded. {missing_count} file(s) failed to upload.")
         logger.warning(f"This may indicate upload failures. Check the debug snapshots for details.")
-        # Still return True to continue with other batches, but log the issue
+        # Return the actual progress count so caller can track real uploads
+        return final_progress
     elif final_progress == 0:
         logger.warning(f"⚠️  WARNING: Could not determine final upload count for batch {batch_number}. Upload may have failed.")
+        # Return 0 to indicate failure
+        return 0
     else:
         logger.debug(f"Batch {batch_number} upload complete: {final_progress}/{batch_end_count} files uploaded successfully.")
-    
-    return True
+        # Return the actual progress count
+        return final_progress
 
 def upload_photos(driver, selected_images, batch_size):
     """Upload photos to the current playlist in batches."""
@@ -1041,7 +1055,7 @@ def upload_photos(driver, selected_images, batch_size):
             
             # Upload the batch
             logger.debug(f"Uploading batch {batch_number} of {batch_count} ({len(batch)} photos)...")
-            batch_success = upload_batch(
+            actual_uploaded_count = upload_batch(
                 driver, 
                 batch, 
                 batch_number, 
@@ -1050,9 +1064,16 @@ def upload_photos(driver, selected_images, batch_size):
                 logfile
             )
             
-            if batch_success:
-                # Update the cumulative count for the next batch
-                cumulative_uploaded_count += len(batch)
+            # Update the cumulative count based on actual uploads, not expected batch size
+            if actual_uploaded_count > 0:
+                # actual_uploaded_count is the cumulative total, so use it directly
+                files_uploaded_this_batch = actual_uploaded_count - cumulative_uploaded_count
+                # Ensure we don't go negative or exceed batch size
+                files_uploaded_this_batch = max(0, min(files_uploaded_this_batch, len(batch)))
+                cumulative_uploaded_count = actual_uploaded_count
+                logger.debug(f"Batch {batch_number}: {files_uploaded_this_batch}/{len(batch)} files uploaded. Cumulative: {cumulative_uploaded_count}")
+            else:
+                logger.warning(f"Batch {batch_number} failed to upload. Cumulative count unchanged: {cumulative_uploaded_count}")
 
             
             # Optional: wait briefly between batches
