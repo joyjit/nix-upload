@@ -84,6 +84,7 @@ The script uses a `config.json` file for configuration. Here are all available p
   - Linux examples:
     - `"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"`
     - `"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"`
+- `debug_directory`: Directory for storing log files and debug snapshots (default: "debug")
 
 ### Date Format Options
 Common date format options for the `date_format` parameter:
@@ -114,7 +115,8 @@ Common date format options for the `date_format` parameter:
     "caption_position": "bottom",
     "date_format": "%b %Y",
     "font_size": 50,
-    "font_path": "C:/Windows/Fonts/arial.ttf"
+    "font_path": "C:/Windows/Fonts/arial.ttf",
+    "debug_directory": "debug"
 }
 ```
 

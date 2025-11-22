@@ -16,5 +16,6 @@
     "caption_position": "bottom",
     "date_format": "%Y-%m-%d %H:%M",
     "font_size": 50,
-    "font_path": null
+    "font_path": null,
+    "debug_directory": "debug"
 }

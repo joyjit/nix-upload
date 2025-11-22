@@ -32,12 +32,16 @@ logger.setLevel(logging.INFO)
 # Global variable to store log file path
 log_file_path = None
 
-def setup_file_logging():
+# Global variable to store debug directory
+debug_directory = 'debug'
+
+def setup_file_logging(debug_dir='debug'):
     """Set up file logging with a timestamped log file."""
-    global log_file_path
+    global log_file_path, debug_directory
+    debug_directory = debug_dir
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    os.makedirs("debug", exist_ok=True)
-    log_file_path = os.path.join("debug", f"{timestamp}_nix_upload.log")
+    os.makedirs(debug_directory, exist_ok=True)
+    log_file_path = os.path.join(debug_directory, f"{timestamp}_nix_upload.log")
     
     file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
@@ -67,12 +71,13 @@ atexit.register(cleanup_temp_files)
 
 def save_debug_snapshot(driver, label):
     """Save screenshot and page source for debugging."""
+    global debug_directory
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     safe_label = label.replace(" ", "_").lower()
-    os.makedirs("debug", exist_ok=True)
+    os.makedirs(debug_directory, exist_ok=True)
     
-    screenshot_path = os.path.join("debug", f"{timestamp}_{safe_label}.png")
-    html_path = os.path.join("debug", f"{timestamp}_{safe_label}.html")
+    screenshot_path = os.path.join(debug_directory, f"{timestamp}_{safe_label}.png")
+    html_path = os.path.join(debug_directory, f"{timestamp}_{safe_label}.html")
     
     try:
         driver.save_screenshot(screenshot_path)
@@ -101,7 +106,8 @@ def load_config(config_file='config.json'):
         'caption_position': 'bottom',
         'date_format': '%Y-%m-%d %H:%M',
         'font_size': 50,
-        'font_path': None
+        'font_path': None,
+        'debug_directory': 'debug'
     }
     
     REQUIRED_KEYS = ['username', 'password', 'photos_directory']
@@ -1006,6 +1012,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
 
 def upload_photos(driver, selected_images, batch_size):
     """Upload photos to the current playlist in batches."""
+    global debug_directory
     try:
         # logger.info("Preparing to upload photos max_file_size_mb=%d, max_photos=%d, batch_size=%d ..." % (max_file_size_mb, max_photos, batch_size))
         
@@ -1017,8 +1024,7 @@ def upload_photos(driver, selected_images, batch_size):
         debug_file_name = f"{timestamp}_uploaded_files.txt"
         logfile=None
         try:
-            # os.makedirs("debug", exist_ok=True)
-            debug_file_path = os.path.join("debug", debug_file_name)  # Use debug_screenshots directory
+            debug_file_path = os.path.join(debug_directory, debug_file_name)  # Use debug_screenshots directory
             logfile=open(debug_file_path, "w")
         except Exception as e:
             logger.warning(f"Error creating {debug_file_name}. Continuing")
@@ -1073,10 +1079,11 @@ def main():
                         help='Path to configuration file (default: config.json)')
     args = parser.parse_args()
     
-    # Set up file logging first so all logs are captured
-    setup_file_logging()
-    
+    # Load config first to get debug_directory
     config = load_config(args.config)
+    
+    # Set up file logging first so all logs are captured
+    setup_file_logging(config.get('debug_directory', 'debug'))
     
     # Convert dictionary to an object with attributes
     cfg = SimpleNamespace(**config)
@@ -1114,7 +1121,7 @@ def main():
         if not delete_all_from_playlist(driver):
             logger.warning("Failed to delete existing photos. Continuing with upload...")
         
-        if not upload_photos(driver, image_files, cfg.batch_size):
+        if not upload_photos(driver, image_files, cfg.batch_size ):
             logger.error("Failed to upload photos.")
             exit(1)
         
