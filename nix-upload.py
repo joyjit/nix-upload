@@ -107,6 +107,11 @@ def load_config(config_file='config.json'):
     REQUIRED_KEYS = ['username', 'password', 'photos_directory']
 
     try:
+        # Get absolute path and filename for logging
+        config_path = os.path.abspath(config_file)
+        config_name = os.path.basename(config_path)
+        logger.info(f"Loading config file: {config_name} (path: {config_path})")
+        
         with open(config_file, 'r') as f:
             config = json.load(f)
         
