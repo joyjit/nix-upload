@@ -3,6 +3,7 @@ import random
 import time
 import json
 import argparse
+import base64
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -80,7 +81,60 @@ def save_debug_snapshot(driver, label):
     html_path = os.path.join(debug_directory, f"{timestamp}_{safe_label}.html")
     
     try:
-        driver.save_screenshot(screenshot_path)
+        # Use Chrome DevTools Protocol for full-page screenshot
+        # This is more reliable than resizing the window
+        try:
+            # Get full page dimensions
+            full_width = driver.execute_script("return Math.max(document.body.scrollWidth, document.body.offsetWidth, document.documentElement.clientWidth, document.documentElement.scrollWidth, document.documentElement.offsetWidth, window.innerWidth);")
+            full_height = driver.execute_script("return Math.max(document.body.scrollHeight, document.body.offsetHeight, document.documentElement.clientHeight, document.documentElement.scrollHeight, document.documentElement.offsetHeight, window.innerHeight);")
+            
+            # Use CDP to take full-page screenshot
+            driver.execute_cdp_cmd("Page.setDeviceMetricsOverride", {
+                "width": int(full_width),
+                "height": int(full_height),
+                "deviceScaleFactor": 1,
+                "mobile": False
+            })
+            
+            # Take screenshot using CDP
+            screenshot_result = driver.execute_cdp_cmd("Page.captureScreenshot", {
+                "format": "png",
+                "captureBeyondViewport": True
+            })
+            
+            # Decode and save the screenshot
+            screenshot_data = base64.b64decode(screenshot_result['data'])
+            with open(screenshot_path, 'wb') as f:
+                f.write(screenshot_data)
+            
+            # Reset device metrics
+            driver.execute_cdp_cmd("Emulation.clearDeviceMetricsOverride", {})
+            
+        except Exception as cdp_error:
+            # Fallback to window resize method if CDP fails
+            logger.debug(f"CDP screenshot failed, using fallback method: {cdp_error}")
+            original_size = driver.get_window_size()
+            
+            # Get full page dimensions using JavaScript
+            full_width = driver.execute_script("return Math.max(document.body.scrollWidth, document.body.offsetWidth, document.documentElement.clientWidth, document.documentElement.scrollWidth, document.documentElement.offsetWidth, window.innerWidth);")
+            full_height = driver.execute_script("return Math.max(document.body.scrollHeight, document.body.offsetHeight, document.documentElement.clientHeight, document.documentElement.scrollHeight, document.documentElement.offsetHeight, window.innerHeight);")
+            
+            # Ensure dimensions are reasonable (Chrome has limits)
+            max_width = 4096
+            max_height = 4096
+            full_width = min(int(full_width), max_width)
+            full_height = min(int(full_height), max_height)
+            
+            # Resize window to full page dimensions
+            driver.set_window_size(full_width, full_height)
+            time.sleep(0.5)  # Give it time to resize
+            
+            # Take full-page screenshot
+            driver.save_screenshot(screenshot_path)
+            
+            # Restore original window size
+            driver.set_window_size(original_size['width'], original_size['height'])
+        
         with open(html_path, 'w', encoding='utf-8') as f:
             f.write(driver.page_source)
         logger.debug(f"Saved debug snapshot: {screenshot_path}, {html_path}")
