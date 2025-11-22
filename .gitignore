@@ -2,3 +2,10 @@ config.json
 debug
 config.json-OLD
 debug-config.json
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
