@@ -26,17 +26,20 @@ This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if yo
      cp sample_config.json config.json
      ```
 
-3. **Install Dependencies**
+3. **Create a Virtual Environment and Install Dependencies**
    ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install --upgrade pip
    pip install -r requirements.txt
    ```
 
 4. **Configure the Application**
    - Edit `config.json` with your credentials and preferences
-   - Required parameters:
+  - Required parameters:
      - `username`: Your Nixplay account email
      - `password`: Your Nixplay account password
-     - `photos_directory`: Path to your photos directory
+  - `photos_directory` now defaults to `/home/shared/media` if omitted
 
 5. **Run**
    ```bash
@@ -55,7 +58,9 @@ The script uses a `config.json` file for configuration. Here are all available p
 ### Required Parameters
 - `username`: Your Nixplay account username
 - `password`: Your Nixplay account password
-- `photos_directory`: Path to the directory containing your photos
+
+### Defaulted Parameter
+- `photos_directory`: Path to the directory containing your photos (default: "/home/shared/media")
 
 ### Optional Parameters
 - `base_url`: Nixplay website URL (default: "https://app.nixplay.com")
@@ -100,7 +105,7 @@ Common date format options for the `date_format` parameter:
 {
     "username": "USERNAME",
     "password": "PASSWORD",
-    "photos_directory": "PATH/TO/ROOT/OF/YOUR/PHOTOS/DIR",
+    "photos_directory": "/home/shared/media",
     "base_url": "https://app.nixplay.com",
     "playlist_name": "nix-upload",
     "delete_my_uploads": true,
