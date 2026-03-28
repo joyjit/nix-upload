@@ -1,5 +1,7 @@
 import os
+import csv
 import random
+import threading
 import time
 import json
 import argparse
@@ -162,7 +164,9 @@ def load_config(config_file='config.json'):
         'date_format': '%Y-%m-%d %H:%M',
         'font_size': 50,
         'font_path': None,
-        'debug_directory': 'debug'
+        'debug_directory': 'debug',
+        'reverse_geocode': True,
+        'cache_directory': 'cache',
     }
     
     REQUIRED_KEYS = ['username', 'password', 'photos_directory']
@@ -192,6 +196,14 @@ def load_config(config_file='config.json'):
         # Validate headless is boolean
         if not isinstance(merged_config['headless'], bool):
             raise ValueError(f"The 'headless' parameter must be a boolean (True or False).")
+
+        if not isinstance(merged_config['reverse_geocode'], bool):
+            raise ValueError("The 'reverse_geocode' parameter must be a boolean (True or False).")
+
+        cd = merged_config.get('cache_directory')
+        if not isinstance(cd, str) or not cd.strip():
+            raise ValueError("The 'cache_directory' parameter must be a non-empty string.")
+        merged_config['cache_directory'] = os.path.abspath(os.path.expanduser(cd.strip()))
 
         # Configure logger
         log_level = merged_config['log_level'].upper()
@@ -240,7 +252,7 @@ def display_progress_bar(prefix, start_time, timeout, current, total, suffix="",
 def end_progress_bar():
     print()
     
-def get_image_files(directory, max_file_size_mb, max_photos, target_width, target_height, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True):
+def get_image_files(directory, max_file_size_mb, max_photos, target_width, target_height, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
     """Recursively get all image files from a directory, skipping folders with a .nonixplay file."""
     valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
     image_files = []
@@ -285,7 +297,9 @@ def get_image_files(directory, max_file_size_mb, max_photos, target_width, targe
                 caption_position=caption_position,
                 font_size=font_size,
                 font_path=font_path,
-                caption=caption
+                caption=caption,
+                reverse_geocode=reverse_geocode,
+                cache_directory=cache_directory,
             )
             if processed_path:
                 final_images.append(processed_path)
@@ -352,55 +366,176 @@ def _get_gps_coordinates(img):
         logger.debug(f"Failed to extract GPS coordinates: {str(e)}")
     return None
 
-def _get_location_name(coordinates):
-    """Convert GPS coordinates to location name using reverse geocoding."""
-    try:
+_nominatim_geolocator = None
+_nominatim_lock = threading.Lock()
+_nominatim_last_finish = 0.0
+# Nominatim usage policy: ~1 request/s; spacing from end of last call avoids burst + geopy RateLimiter retry/traceback spam on 429.
+NOMINATIM_MIN_INTERVAL_SEC = 1.2
+
+def _nominatim_reverse_call(coordinates, language='en'):
+    global _nominatim_geolocator, _nominatim_last_finish
+    if _nominatim_geolocator is None:
         from geopy.geocoders import Nominatim
-        from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
-        from requests.exceptions import RequestException
-        
-        # Initialize geocoder with a longer timeout and custom user agent
-        geolocator = Nominatim(
-            user_agent="nix-upload/1.0",
-            timeout=10  # Increase timeout to 10 seconds
-        )
-        
+        _nominatim_geolocator = Nominatim(user_agent="nix-upload/1.0", timeout=10)
+    with _nominatim_lock:
+        now = time.monotonic()
+        if _nominatim_last_finish > 0:
+            wait = NOMINATIM_MIN_INTERVAL_SEC - (now - _nominatim_last_finish)
+            if wait > 0:
+                time.sleep(wait)
         try:
-            location = geolocator.reverse(coordinates, language='en')
-            
+            return _nominatim_geolocator.reverse(coordinates, language=language)
+        finally:
+            _nominatim_last_finish = time.monotonic()
+
+def _format_coords(coordinates):
+    lat, lon = coordinates
+    return f"{lat:.4f}, {lon:.4f}"
+
+def _is_coordinate_fallback_label(s):
+    """True if label is a lat, lon pair (same shape as _format_coords output)."""
+    t = s.strip().strip('"').strip("'")
+    return bool(re.fullmatch(r'-?\d+\.\d+\s*,\s*-?\d+\.\d+', t))
+
+def _looks_like_place_name(label):
+    """Only values we consider place-like are stored or read from the reverse-geocode cache."""
+    s = label.strip()
+    if not s:
+        return False
+    if _is_coordinate_fallback_label(s):
+        return False
+    return any(c.isalpha() for c in s)
+
+def _reverse_geocode_cell_key(coordinates):
+    lat, lon = coordinates
+    return (round(lat, 1), round(lon, 1))
+
+_reverse_geocode_tables = {}
+
+def _reverse_geocode_file_path(cache_directory):
+    return os.path.join(cache_directory, 'reverse_geocode.csv')
+
+def _load_reverse_geocode_table(path):
+    d = {}
+    skipped_invalid = False
+    try:
+        if not os.path.isfile(path):
+            return d
+        with open(path, 'r', encoding='utf-8', newline='') as f:
+            for row in csv.reader(f):
+                if not row or not row[0].strip():
+                    continue
+                if row[0].lstrip().startswith('#'):
+                    continue
+                if len(row) < 3:
+                    continue
+                try:
+                    key = (round(float(row[0]), 1), round(float(row[1]), 1))
+                except ValueError:
+                    skipped_invalid = True
+                    continue
+                label = ','.join(row[2:]).strip()
+                if not label:
+                    skipped_invalid = True
+                    continue
+                if not _looks_like_place_name(label):
+                    skipped_invalid = True
+                    continue
+                d[key] = label
+        if skipped_invalid:
+            try:
+                _save_reverse_geocode_table(path, d)
+            except OSError as e:
+                logger.debug(f"Reverse geocode cache compact failed: {e}")
+    except OSError as e:
+        logger.debug(f"Reverse geocode cache read failed: {e}")
+    return d
+
+def _get_reverse_geocode_table(cache_directory):
+    path = _reverse_geocode_file_path(cache_directory)
+    if path not in _reverse_geocode_tables:
+        _reverse_geocode_tables[path] = _load_reverse_geocode_table(path)
+    return path, _reverse_geocode_tables[path]
+
+def _save_reverse_geocode_table(path, table):
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix='.rg_', suffix='.csv', dir=dir_name or '.', text=True)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='') as f:
+            w = csv.writer(f, lineterminator='\n')
+            for clat, clon in sorted(table.keys(), key=lambda t: (t[0], t[1])):
+                lbl = table[(clat, clon)]
+                if not _looks_like_place_name(lbl):
+                    continue
+                w.writerow([f"{clat:.1f}", f"{clon:.1f}", lbl])
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+def _get_location_name(coordinates, cache_directory=None):
+    """Reverse geocode via Nominatim; optional CSV cache; rate-limited; 429-safe."""
+    if cache_directory:
+        _, table = _get_reverse_geocode_table(cache_directory)
+        key = _reverse_geocode_cell_key(coordinates)
+        cached = table.get(key)
+        if cached is not None and _looks_like_place_name(cached):
+            return cached
+
+    result = None
+    try:
+        from geopy.exc import GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError
+        from requests.exceptions import RequestException
+
+        try:
+            location = _nominatim_reverse_call(coordinates, language='en')
+
             if location and location.raw.get('address'):
-                # Try to get city name, fall back to other location components
                 address = location.raw['address']
                 city = address.get('city') or address.get('town') or address.get('village')
                 if city:
-                    return city
-                return location.address.split(',')[0]  # Return first part of address if no city found
+                    result = city
+                else:
+                    result = location.address.split(',')[0]
         except GeocoderTimedOut as e:
-            logger.warning(f"Geocoding timed out: {str(e)}")
-            # Fallback to coordinates if geocoding fails
-            lat, lon = coordinates
-            return f"{lat:.4f}, {lon:.4f}"
+            logger.debug(f"Geocoding timed out: {str(e)}")
+            result = _format_coords(coordinates)
         except GeocoderUnavailable as e:
-            logger.warning(f"Geocoding service unavailable: {str(e)}")
-            # Fallback to coordinates if geocoding fails
-            lat, lon = coordinates
-            return f"{lat:.4f}, {lon:.4f}"
+            logger.debug(f"Geocoding service unavailable: {str(e)}")
+            result = _format_coords(coordinates)
+        except GeocoderServiceError as e:
+            logger.debug(f"Geocoding service error: {str(e)}")
+            result = _format_coords(coordinates)
         except RequestException as e:
-            logger.warning(f"Network request failed: {str(e)}")
-            # Fallback to coordinates if geocoding fails
-            lat, lon = coordinates
-            return f"{lat:.4f}, {lon:.4f}"
-            
-    except Exception as e:
-        logger.warning(f"Failed to get location name: {str(e)}")
-        # Fallback to coordinates if any other error occurs
-        lat, lon = coordinates
-        return f"{lat:.4f}, {lon:.4f}"
-    
-    # Final fallback if all else fails
-    return None
+            logger.debug(f"Network request failed: {str(e)}")
+            result = _format_coords(coordinates)
 
-def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True):
+    except Exception as e:
+        logger.debug(f"Failed to get location name: {str(e)}")
+        result = _format_coords(coordinates)
+
+    if result is None:
+        return None
+
+    if cache_directory and _looks_like_place_name(result):
+        try:
+            path, table = _get_reverse_geocode_table(cache_directory)
+            key = _reverse_geocode_cell_key(coordinates)
+            if table.get(key) != result:
+                table[key] = result
+                _save_reverse_geocode_table(path, table)
+        except OSError as e:
+            logger.debug(f"Reverse geocode cache write failed: {e}")
+
+    return result
+
+def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
     """
     Resize image to fit the target dimensions and ensure it's under max_file_size.
     Adds text overlay with date and location (from GPS data) if caption is True.
@@ -475,7 +610,10 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 location_text = None
                 coordinates = _get_gps_coordinates(img)
                 if coordinates:
-                    location_text = _get_location_name(coordinates)
+                    if reverse_geocode:
+                        location_text = _get_location_name(coordinates, cache_directory)
+                    else:
+                        location_text = _format_coords(coordinates)
                 
                 # Prepare text lines
                 text_lines = [date_text]
@@ -1323,7 +1461,7 @@ def main():
         else:
             logger.debug(f"{key}: {value}")
 
-    image_files = get_image_files(cfg.photos_directory, cfg.max_file_size_mb, cfg.max_photos, cfg.image_width, cfg.image_height, cfg.date_format, cfg.caption_position, cfg.font_size, cfg.font_path, cfg.caption)
+    image_files = get_image_files(cfg.photos_directory, cfg.max_file_size_mb, cfg.max_photos, cfg.image_width, cfg.image_height, cfg.date_format, cfg.caption_position, cfg.font_size, cfg.font_path, cfg.caption, cfg.reverse_geocode, cfg.cache_directory)
     if not image_files:
         logger.error(f"No image files found in '{cfg.photos_directory}'.")
         exit(1)

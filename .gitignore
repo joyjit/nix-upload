@@ -12,3 +12,6 @@ __pycache__/
 .venv/
 MEMORY.md
 .specstory/
+
+# Local cache (geolocation and future cache types)
+cache/

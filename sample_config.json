@@ -13,6 +13,8 @@
     "log_level": "INFO",
     "headless": true,
     "caption": true,
+    "reverse_geocode": true,
+    "cache_directory": "cache",
     "caption_position": "bottom",
     "date_format": "%Y-%m-%d %H:%M",
     "font_size": 50,
