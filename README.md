@@ -2,7 +2,7 @@
 A Python utility that automatically uploads photos from your local directory (recursively) to Nixplay digital photo frames. The tool supports batch processing, image resizing, and text overlay with date and location information.
 
 >[!CAUTION]
-This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if you set the **delete_my_uploads** configuration value to **true**,
+This script removes existing photos from the **target playlist** before uploading. Setting **delete_my_uploads** to **true** also clears the **My uploads** album at run start.
 
 
 ## How to Install
@@ -10,6 +10,7 @@ This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if yo
    - Python 3.8 or higher
    - A Nixplay account
    - Local directory containing photos to upload
+   - Chrome or Chromium for Selenium (if none is found on your system, the script can download Chrome for Testing into a cache directory)
 
 2. **Set Up Project Directory**
    - Create a new directory for the project
@@ -36,9 +37,10 @@ This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if yo
 
 4. **Configure the Application**
    - Edit `config.json` with your credentials and preferences
-  - Required parameters:
+   - Required parameters:
      - `username`: Your Nixplay account email
      - `password`: Your Nixplay account password
+     - `photos_directory`: Absolute or relative path to the root folder containing photos (searched recursively)
 
 5. **Run**
    ```bash
@@ -57,25 +59,25 @@ The script uses a `config.json` file for configuration. Here are all available p
 ### Required Parameters
 - `username`: Your Nixplay account username
 - `password`: Your Nixplay account password
-
-### Defaulted Parameter
-- `photos_directory`: Path to the directory containing your photos (default: "/home/shared/media")
+- `photos_directory`: Path to the directory containing your photos (no default; must be set in `config.json`)
 
 ### Optional Parameters
 - `base_url`: Nixplay website URL (default: "https://app.nixplay.com")
 - `playlist_name`: Name of the Nixplay playlist to upload to (default: "nix-upload")
-- `delete_my_uploads`: Whether to delete your "My uploads" album every time (default: false)
+- `delete_my_uploads`: Whether to delete your "My uploads" album when the run starts (default: true). `sample_config.json` sets this to false so new users avoid wiping that album by mistake.
 - `max_photos`: Maximum number of photos to upload (default: 500)
 - `max_file_size_mb`: Maximum file size for each photo in MB (default: 3)
 - `batch_size`: Number of photos to upload in each batch (default: 100)
 - `image_width`: Target width for resized images (default: 1280)
 - `image_height`: Target height for resized images (default: 800)
 - `log_level`: Logging level (default: "INFO")
-- `headless`: Run browser in headless mode (default: true)
+- `headless`: Run browser in headless mode (default: true). If `DISPLAY` is unset, headless is forced even when set to false.
 - `caption`: Whether to add text overlay with date and location (default: true)
+- `reverse_geocode`: When `caption` is true and GPS is present, call OpenStreetMap Nominatim to resolve place names (default: true). Set to false to caption location as coordinates only and avoid network calls.
+- `cache_directory`: Directory for the reverse-geocode CSV cache (default: `"cache"`, expanded to an absolute path). Cache file: `<cache_directory>/reverse_geocode.csv`
 - `date_format`: Format for date display on photos (default: "%Y-%m-%d %H:%M")
 - `caption_position`: Position of text overlay ("top" or "bottom", default: "bottom")
-- `font_size`: Font size for text overlay in points (default: 40)
+- `font_size`: Font size for text overlay in points (default: 50)
 - `font_path`: Path to custom font file (default: null, uses system font)
   - Windows examples:
     - `"C:/Windows/Fonts/arial.ttf"`
@@ -104,18 +106,20 @@ Common date format options for the `date_format` parameter:
 {
     "username": "USERNAME",
     "password": "PASSWORD",
-    "photos_directory": "/home/shared/media",
+    "photos_directory": "PATH/TO/ROOT/OF/YOUR/PHOTOS/DIR",
     "base_url": "https://app.nixplay.com",
     "playlist_name": "nix-upload",
-    "delete_my_uploads": true,
+    "delete_my_uploads": false,
     "max_photos": 500,
     "max_file_size_mb": 3,
     "batch_size": 100,
     "image_width": 1280,
     "image_height": 800,
     "log_level": "INFO",
-    "headless": false,
+    "headless": true,
     "caption": true,
+    "reverse_geocode": true,
+    "cache_directory": "cache",
     "caption_position": "bottom",
     "date_format": "%b %Y",
     "font_size": 50,
@@ -130,9 +134,10 @@ Common date format options for the `date_format` parameter:
    - Optionally specify a custom config file: "python nix-upload.py --config my-config.json"
 
 ## NOTE
-The script will first DELETE ALL PHOTOS from the specified playlist. Then it will upload all the new photos to the same playlist.
+The script clears the **target playlist** before uploading (so previous photos in that playlist are removed). If **delete_my_uploads** is **true**, it also clears the separate **My uploads** album at the start of the run.
+
 >[!CAUTION]
-This script will DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if you set the **delete_my_uploads** configuration value to **true**,
+Setting **delete_my_uploads** to **true** deletes content in the **My uploads** album. Clearing the playlist happens regardless when the run proceeds to upload.
 
 ## Known issues:
 - I dont know why this warning shows, but it seems to be a benign message
