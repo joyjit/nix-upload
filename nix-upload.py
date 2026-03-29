@@ -323,11 +323,13 @@ def _convert_to_degrees(value):
     s = float(value[2])
     return d + (m / 60.0) + (s / 3600.0)
 
-def _get_gps_coordinates(img):
+def _get_gps_coordinates(img, source_hint=None):
     """Extract GPS coordinates from image EXIF data."""
+    hint = source_hint or "image"
     try:
         exif = img._getexif()
         if not exif:
+            logger.debug("Caption GPS: no EXIF (or format without EXIF) for %s", hint)
             return None
 
         # GPS tags
@@ -335,12 +337,14 @@ def _get_gps_coordinates(img):
         gps_lat_ref = None
         gps_lon = None
         gps_lon_ref = None
+        gps_block = None
 
         for tag_id in exif:
             tag = TAGS.get(tag_id, tag_id)
             data = exif.get(tag_id)
             
             if tag == 'GPSInfo':
+                gps_block = data
                 for key in data.keys():
                     sub_tag = GPSTAGS.get(key, key)
                     if sub_tag == 'GPSLatitude':
@@ -352,18 +356,39 @@ def _get_gps_coordinates(img):
                     elif sub_tag == 'GPSLongitudeRef':
                         gps_lon_ref = data[key]
 
-        if gps_lat and gps_lon:
-            lat = _convert_to_degrees(gps_lat)
-            lon = _convert_to_degrees(gps_lon)
-            
-            if gps_lat_ref != 'N':
-                lat = -lat
-            if gps_lon_ref != 'E':
-                lon = -lon
-                
-            return (lat, lon)
+        if gps_block is None:
+            logger.debug("Caption GPS: EXIF present but no GPSInfo for %s", hint)
+            return None
+
+        if not (gps_lat and gps_lon):
+            logger.debug(
+                "Caption GPS: incomplete GPS tags for %s (lat=%r lon=%r)",
+                hint,
+                gps_lat is not None,
+                gps_lon is not None,
+            )
+            return None
+
+        if gps_lat_ref is None or gps_lon_ref is None:
+            logger.warning(
+                "Caption GPS: missing lat/lon ref for %s (lat_ref=%r lon_ref=%r); "
+                "using hemisphere defaults may be wrong",
+                hint,
+                gps_lat_ref,
+                gps_lon_ref,
+            )
+
+        lat = _convert_to_degrees(gps_lat)
+        lon = _convert_to_degrees(gps_lon)
+
+        if gps_lat_ref != 'N':
+            lat = -lat
+        if gps_lon_ref != 'E':
+            lon = -lon
+
+        return (lat, lon)
     except Exception as e:
-        logger.warning(f"Failed to extract GPS coordinates: {str(e)}")
+        logger.warning("Caption GPS: failed to extract coordinates for %s: %s", hint, e)
     return None
 
 _nominatim_geolocator = None
@@ -489,6 +514,7 @@ def _get_location_name(coordinates, cache_directory=None):
             return cached
 
     result = None
+    geocode_fail_detail = None
     try:
         from geopy.exc import GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError
 
@@ -499,6 +525,12 @@ def _get_location_name(coordinates, cache_directory=None):
 
         try:
             location = _nominatim_reverse_call(coordinates, language='en')
+            coord_s = _format_coords(coordinates)
+
+            if not location:
+                geocode_fail_detail = "Nominatim returned no location object"
+            elif not location.raw.get('address'):
+                geocode_fail_detail = "Nominatim raw response has no 'address' key"
 
             if location and location.raw.get('address'):
                 address = location.raw['address']
@@ -506,7 +538,15 @@ def _get_location_name(coordinates, cache_directory=None):
                 if city:
                     result = city
                 else:
-                    result = location.address.split(',')[0]
+                    part = (location.address or "").split(",")[0].strip()
+                    if part:
+                        result = part
+                    else:
+                        logger.warning(
+                            "Caption geocode: no city/town/village and empty display address for %s; using coordinates",
+                            coord_s,
+                        )
+                        result = _format_coords(coordinates)
         except GeocoderTimedOut as e:
             logger.warning(f"Geocoding timed out: {str(e)}")
             result = _format_coords(coordinates)
@@ -528,6 +568,12 @@ def _get_location_name(coordinates, cache_directory=None):
         result = _format_coords(coordinates)
 
     if result is None:
+        suffix = f" — {geocode_fail_detail}" if geocode_fail_detail else " — unknown reason"
+        logger.warning(
+            "Caption geocode: no location line for %s%s",
+            _format_coords(coordinates),
+            suffix,
+        )
         return None
 
     if cache_directory and _looks_like_place_name(result):
@@ -547,7 +593,8 @@ def _thread_reverse_geocode_result(coordinates, cache_directory, out):
     try:
         out[0] = _get_location_name(coordinates, cache_directory)
     except Exception as e:
-        logger.warning(f"Reverse geocode thread failed: {e}")
+        logger.warning("Caption geocode thread: failed for %s: %s", _format_coords(coordinates), e)
+        logger.debug("Caption geocode thread traceback", exc_info=True)
         out[0] = _format_coords(coordinates)
 
 def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
@@ -556,9 +603,10 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
     Adds text overlay with date and location (from GPS data) if caption is True.
     Returns path to resized image or None if processing failed or file is too large.
     """
+    img_basename = os.path.basename(image_path)
     try:
         with Image.open(image_path) as img:
-            coordinates = _get_gps_coordinates(img) if caption else None
+            coordinates = _get_gps_coordinates(img, source_hint=img_basename) if caption else None
             geo_out = [None]
             geo_thread = None
             if caption and coordinates and reverse_geocode:
@@ -606,28 +654,59 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 img_with_text = resized_img.copy()
                 
                 # Load font
-                if font_path and os.path.exists(font_path):
-                    font = ImageFont.truetype(font_path, font_size)
-                else:
-                    # Use default system font
+                font = None
+                if font_path:
+                    if not os.path.exists(font_path):
+                        logger.warning(
+                            "Caption font: font_path does not exist %r for %s; trying arial.ttf then default",
+                            font_path,
+                            img_basename,
+                        )
+                    else:
+                        try:
+                            font = ImageFont.truetype(font_path, font_size)
+                        except OSError as e:
+                            logger.warning(
+                                "Caption font: failed to load %r for %s: %s; trying arial.ttf then default",
+                                font_path,
+                                img_basename,
+                                e,
+                            )
+                if font is None:
                     try:
                         font = ImageFont.truetype("arial.ttf", font_size)
-                    except:
+                    except OSError as e:
+                        logger.warning(
+                            "Caption font: arial.ttf not usable for %s: %s; using PIL bitmap default "
+                            "(often tiny relative to image size — set font_path to a .ttf)",
+                            img_basename,
+                            e,
+                        )
                         font = ImageFont.load_default()
                 
                 draw = ImageDraw.Draw(img_with_text)
                 
                 # Get image creation date from EXIF data if available
+                date_source = "exif"
                 try:
                     exif = img._getexif()
                     if exif and 36867 in exif:  # 36867 is DateTimeOriginal
                         date_str = exif[36867]
                         date_obj = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
                     else:
-                        # Use file modification time as fallback
+                        date_source = "mtime"
+                        logger.debug(
+                            "Caption date: no EXIF DateTimeOriginal for %s; using file mtime",
+                            img_basename,
+                        )
                         date_obj = datetime.fromtimestamp(os.path.getmtime(image_path))
-                except:
-                    # Use file modification time as fallback
+                except Exception as e:
+                    date_source = "mtime"
+                    logger.warning(
+                        "Caption date: could not read EXIF date for %s (%s); using file mtime",
+                        img_basename,
+                        e,
+                    )
                     date_obj = datetime.fromtimestamp(os.path.getmtime(image_path))
                 
                 # Format date string
@@ -652,24 +731,69 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 if caption_position == "bottom":
                     y_position = new_height - (len(text_lines) * font_size * 1.2) - caption_y_offset  
                 else:  # top
-                    y_position = caption_y_offset  
+                    y_position = caption_y_offset
+
+                line_step = int(font_size * 1.2)
+                y_bottom = y_position + len(text_lines) * line_step
+                if y_position < 0 or y_bottom > new_height:
+                    logger.warning(
+                        "Caption layout: vertical range may clip or fall outside image for %s "
+                        "(y=%s..%s, image_h=%s, lines=%s, font_size=%s, position=%s). "
+                        "Reduce font_size or caption_y_offset.",
+                        img_basename,
+                        y_position,
+                        y_bottom,
+                        new_height,
+                        len(text_lines),
+                        font_size,
+                        caption_position,
+                    )
                 
                 # Draw text with outline for better visibility
                 outline_color = (0, 0, 0) if text_color == (255, 255, 255) else (255, 255, 255)
                 outline_width = 2
                 
-                for i, line in enumerate(text_lines):
-                    # Draw outline
-                    for dx in range(-outline_width, outline_width + 1):
-                        for dy in range(-outline_width, outline_width + 1):
-                            draw.text((caption_x_offset + dx, y_position + (i * font_size * 1.2) + dy), line, font=font, fill=outline_color)
-                    # Draw main text
-                    draw.text((caption_x_offset, y_position + (i * font_size * 1.2)), line, font=font, fill=text_color)
+                try:
+                    for i, line in enumerate(text_lines):
+                        x0 = caption_x_offset
+                        y0 = y_position + i * line_step
+                        for dx in range(-outline_width, outline_width + 1):
+                            for dy in range(-outline_width, outline_width + 1):
+                                draw.text((x0 + dx, y0 + dy), line, font=font, fill=outline_color)
+                        draw.text((x0, y0), line, font=font, fill=text_color)
+                        try:
+                            bbox = draw.textbbox((x0, y0), line, font=font)
+                        except Exception:
+                            bbox = None
+                        if bbox is not None:
+                            l, t, r, b = bbox
+                            if l < 0 or t < 0 or r > new_width or b > new_height:
+                                logger.warning(
+                                    "Caption layout: text bbox (%s,%s,%s,%s) exceeds image %sx%s for %s line %r",
+                                    l,
+                                    t,
+                                    r,
+                                    b,
+                                    new_width,
+                                    new_height,
+                                    img_basename,
+                                    line[:48] + ("..." if len(line) > 48 else ""),
+                                )
+                except Exception as e:
+                    logger.warning("Caption draw: failed for %s: %s", img_basename, e)
+                    raise
+                
+                logger.debug(
+                    "Caption applied: %s date_source=%s lines=%r",
+                    img_basename,
+                    date_source,
+                    text_lines,
+                )
                 
                 resized_img = img_with_text
             
             # Create output path in temp directory
-            img_filename = os.path.basename(image_path)
+            img_filename = img_basename
             output_path = os.path.join(temp_dir, img_filename)
             
             # Save with 80% quality for JPG/JPEG
@@ -687,7 +811,8 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
             return output_path
     
     except Exception as e:
-        logger.warning(f"Error processing image {image_path}: {str(e)}")
+        logger.warning("Error processing image %s: %s", image_path, e)
+        logger.debug("Caption/processing traceback for %s", img_basename, exc_info=True)
         return None
 
 def setup_webdriver(headless):
