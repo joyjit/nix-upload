@@ -535,6 +535,14 @@ def _get_location_name(coordinates, cache_directory=None):
 
     return result
 
+def _thread_reverse_geocode_result(coordinates, cache_directory, out):
+    """Worker for background reverse geocode; out[0] receives the label (or None)."""
+    try:
+        out[0] = _get_location_name(coordinates, cache_directory)
+    except Exception as e:
+        logger.debug(f"Reverse geocode thread failed: {e}")
+        out[0] = _format_coords(coordinates)
+
 def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
     """
     Resize image to fit the target dimensions and ensure it's under max_file_size.
@@ -543,6 +551,18 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
     """
     try:
         with Image.open(image_path) as img:
+            coordinates = _get_gps_coordinates(img) if caption else None
+            geo_out = [None]
+            geo_thread = None
+            if caption and coordinates and reverse_geocode:
+                geo_thread = threading.Thread(
+                    target=_thread_reverse_geocode_result,
+                    args=(coordinates, cache_directory, geo_out),
+                    name="nix-reverse-geocode",
+                    daemon=True,
+                )
+                geo_thread.start()
+
             # Calculate dimensions while maintaining aspect ratio
             img_width, img_height = img.size
             aspect_ratio = img_width / img_height
@@ -606,14 +626,13 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 # Format date string
                 date_text = date_obj.strftime(date_format)
                 
-                # Get location from GPS coordinates
-                location_text = None
-                coordinates = _get_gps_coordinates(img)
-                if coordinates:
-                    if reverse_geocode:
-                        location_text = _get_location_name(coordinates, cache_directory)
-                    else:
-                        location_text = _format_coords(coordinates)
+                if geo_thread is not None:
+                    geo_thread.join()
+                    location_text = geo_out[0]
+                elif coordinates and not reverse_geocode:
+                    location_text = _format_coords(coordinates)
+                else:
+                    location_text = None
                 
                 # Prepare text lines
                 text_lines = [date_text]
