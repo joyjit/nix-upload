@@ -363,7 +363,7 @@ def _get_gps_coordinates(img):
                 
             return (lat, lon)
     except Exception as e:
-        logger.debug(f"Failed to extract GPS coordinates: {str(e)}")
+        logger.warning(f"Failed to extract GPS coordinates: {str(e)}")
     return None
 
 _nominatim_geolocator = None
@@ -446,9 +446,9 @@ def _load_reverse_geocode_table(path):
             try:
                 _save_reverse_geocode_table(path, d)
             except OSError as e:
-                logger.debug(f"Reverse geocode cache compact failed: {e}")
+                logger.warning(f"Reverse geocode cache compact failed: {e}")
     except OSError as e:
-        logger.debug(f"Reverse geocode cache read failed: {e}")
+        logger.warning(f"Reverse geocode cache read failed: {e}")
     return d
 
 def _get_reverse_geocode_table(cache_directory):
@@ -508,23 +508,23 @@ def _get_location_name(coordinates, cache_directory=None):
                 else:
                     result = location.address.split(',')[0]
         except GeocoderTimedOut as e:
-            logger.debug(f"Geocoding timed out: {str(e)}")
+            logger.warning(f"Geocoding timed out: {str(e)}")
             result = _format_coords(coordinates)
         except GeocoderUnavailable as e:
-            logger.debug(f"Geocoding service unavailable: {str(e)}")
+            logger.warning(f"Geocoding service unavailable: {str(e)}")
             result = _format_coords(coordinates)
         except GeocoderServiceError as e:
-            logger.debug(f"Geocoding service error: {str(e)}")
+            logger.warning(f"Geocoding service error: {str(e)}")
             result = _format_coords(coordinates)
         except Exception as e:
             if _RequestException and isinstance(e, _RequestException):
-                logger.debug(f"Network request failed: {str(e)}")
+                logger.warning(f"Network request failed: {str(e)}")
                 result = _format_coords(coordinates)
             else:
                 raise
 
     except Exception as e:
-        logger.debug(f"Failed to get location name: {str(e)}")
+        logger.warning(f"Failed to get location name: {str(e)}")
         result = _format_coords(coordinates)
 
     if result is None:
@@ -538,7 +538,7 @@ def _get_location_name(coordinates, cache_directory=None):
                 table[key] = result
                 _save_reverse_geocode_table(path, table)
         except OSError as e:
-            logger.debug(f"Reverse geocode cache write failed: {e}")
+            logger.warning(f"Reverse geocode cache write failed: {e}")
 
     return result
 
@@ -547,7 +547,7 @@ def _thread_reverse_geocode_result(coordinates, cache_directory, out):
     try:
         out[0] = _get_location_name(coordinates, cache_directory)
     except Exception as e:
-        logger.debug(f"Reverse geocode thread failed: {e}")
+        logger.warning(f"Reverse geocode thread failed: {e}")
         out[0] = _format_coords(coordinates)
 
 def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
@@ -680,7 +680,7 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
             
             # Check if the processed file is still too large
             if os.path.getsize(output_path) > max_file_size:
-                logger.debug(f"Skipping {img_filename}: too large after resizing ({os.path.getsize(output_path)/1024/1024:.2f}MB)")
+                logger.warning(f"Skipping {img_filename}: too large after resizing ({os.path.getsize(output_path)/1024/1024:.2f}MB)")
                 os.remove(output_path)  # Clean up the temporary file
                 return None
             
