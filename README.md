@@ -39,7 +39,6 @@ This script will potentially DELETE ALL OF YOUR PREVIOUSLY UPLOADED photos if yo
   - Required parameters:
      - `username`: Your Nixplay account email
      - `password`: Your Nixplay account password
-  - `photos_directory` now defaults to `/home/shared/media` if omitted
 
 5. **Run**
    ```bash
