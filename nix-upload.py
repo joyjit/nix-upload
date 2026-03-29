@@ -597,6 +597,61 @@ def _thread_reverse_geocode_result(coordinates, cache_directory, out):
         logger.debug("Caption geocode thread traceback", exc_info=True)
         out[0] = _format_coords(coordinates)
 
+# Tried in order after optional user font_path (Windows name first, then common Linux/macOS paths).
+_CAPTION_FONT_FALLBACK_CANDIDATES = (
+    "arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+    "/Library/Fonts/Arial.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+)
+
+# First successful path from _CAPTION_FONT_FALLBACK_CANDIDATES (avoids retrying arial on every image).
+_caption_font_fallback_resolved = None
+
+
+def _load_caption_font(font_size, font_path, img_basename):
+    """Resolve a scalable TrueType font; fall back to PIL bitmap only if nothing loads."""
+    global _caption_font_fallback_resolved
+    if font_path:
+        if not os.path.exists(font_path):
+            logger.warning(
+                "Caption font: font_path does not exist %r for %s; trying built-in fallbacks",
+                font_path,
+                img_basename,
+            )
+        else:
+            try:
+                return ImageFont.truetype(font_path, font_size)
+            except OSError as e:
+                logger.warning(
+                    "Caption font: failed to load %r for %s: %s; trying built-in fallbacks",
+                    font_path,
+                    img_basename,
+                    e,
+                )
+    if _caption_font_fallback_resolved:
+        try:
+            return ImageFont.truetype(_caption_font_fallback_resolved, font_size)
+        except OSError:
+            _caption_font_fallback_resolved = None
+    for cand in _CAPTION_FONT_FALLBACK_CANDIDATES:
+        try:
+            font = ImageFont.truetype(cand, font_size)
+            _caption_font_fallback_resolved = cand
+            return font
+        except OSError:
+            continue
+    logger.warning(
+        "Caption font: no scalable TTF loaded for %s; using PIL bitmap default "
+        "(set font_path to a .ttf, e.g. /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf)",
+        img_basename,
+    )
+    return ImageFont.load_default()
+
+
 def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
     """
     Resize image to fit the target dimensions and ensure it's under max_file_size.
@@ -653,36 +708,7 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 # Create a copy of the image for drawing
                 img_with_text = resized_img.copy()
                 
-                # Load font
-                font = None
-                if font_path:
-                    if not os.path.exists(font_path):
-                        logger.warning(
-                            "Caption font: font_path does not exist %r for %s; trying arial.ttf then default",
-                            font_path,
-                            img_basename,
-                        )
-                    else:
-                        try:
-                            font = ImageFont.truetype(font_path, font_size)
-                        except OSError as e:
-                            logger.warning(
-                                "Caption font: failed to load %r for %s: %s; trying arial.ttf then default",
-                                font_path,
-                                img_basename,
-                                e,
-                            )
-                if font is None:
-                    try:
-                        font = ImageFont.truetype("arial.ttf", font_size)
-                    except OSError as e:
-                        logger.warning(
-                            "Caption font: arial.ttf not usable for %s: %s; using PIL bitmap default "
-                            "(often tiny relative to image size — set font_path to a .ttf)",
-                            img_basename,
-                            e,
-                        )
-                        font = ImageFont.load_default()
+                font = _load_caption_font(font_size, font_path, img_basename)
                 
                 draw = ImageDraw.Draw(img_with_text)
                 
