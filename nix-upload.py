@@ -491,7 +491,11 @@ def _get_location_name(coordinates, cache_directory=None):
     result = None
     try:
         from geopy.exc import GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError
-        from requests.exceptions import RequestException
+
+        try:
+            from requests.exceptions import RequestException as _RequestException
+        except ImportError:
+            _RequestException = ()  # isinstance(e, ()) is always false; optional dep
 
         try:
             location = _nominatim_reverse_call(coordinates, language='en')
@@ -512,9 +516,12 @@ def _get_location_name(coordinates, cache_directory=None):
         except GeocoderServiceError as e:
             logger.debug(f"Geocoding service error: {str(e)}")
             result = _format_coords(coordinates)
-        except RequestException as e:
-            logger.debug(f"Network request failed: {str(e)}")
-            result = _format_coords(coordinates)
+        except Exception as e:
+            if _RequestException and isinstance(e, _RequestException):
+                logger.debug(f"Network request failed: {str(e)}")
+                result = _format_coords(coordinates)
+            else:
+                raise
 
     except Exception as e:
         logger.debug(f"Failed to get location name: {str(e)}")
