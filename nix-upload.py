@@ -652,6 +652,136 @@ def _load_caption_font(font_size, font_path, img_basename):
     return ImageFont.load_default()
 
 
+MIN_CAPTION_FONT_SIZE = 8
+
+
+def _caption_line_width(draw, text, font):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0]
+
+
+def _break_long_caption_token(draw, token, font, max_width):
+    """Split a single token into substrings each fitting max_width (greedy)."""
+    out = []
+    rest = token
+    while rest:
+        lo, hi = 1, len(rest)
+        best = 1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            w = _caption_line_width(draw, rest[:mid], font)
+            if w <= max_width:
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        if best < 1:
+            best = 1
+        out.append(rest[:best])
+        rest = rest[best:]
+    return out
+
+
+def _wrap_caption_line_to_width(draw, text, font, max_width):
+    """Word-wrap one logical line into segments that fit max_width."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    words = text.split()
+    lines = []
+    current = []
+    for word in words:
+        candidate = word if not current else " ".join(current + [word])
+        if _caption_line_width(draw, candidate, font) <= max_width:
+            current.append(word)
+            continue
+        if current:
+            lines.append(" ".join(current))
+            current = []
+        if _caption_line_width(draw, word, font) <= max_width:
+            current = [word]
+        else:
+            lines.extend(_break_long_caption_token(draw, word, font, max_width))
+    if current:
+        lines.append(" ".join(current))
+    return lines
+
+
+def _fit_caption_layout(text_lines, new_width, new_height, caption_position, font_size, font_path, img_basename, caption_y_offset, caption_x_offset):
+    """
+    Choose font size (down to MIN_CAPTION_FONT_SIZE), wrap lines, and vertical placement
+    so caption fits within the image margins.
+    Returns (font, wrapped_lines, line_step, y_position, used_font_size).
+    """
+    max_text_width = max(1, new_width - 2 * caption_x_offset)
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    fs = font_size
+    wrapped = []
+    font = None
+    line_step = max(1, int(fs * 1.2))
+    y_position = caption_y_offset
+
+    while fs >= MIN_CAPTION_FONT_SIZE:
+        font = _load_caption_font(fs, font_path, img_basename)
+        wrapped = []
+        for idx, segment in enumerate(text_lines):
+            if idx == 0:
+                if segment.strip():
+                    wrapped.append(segment.strip())
+            else:
+                wrapped.extend(_wrap_caption_line_to_width(measure, segment, font, max_text_width))
+        line_step = max(1, int(fs * 1.2))
+        n = len(wrapped)
+        if caption_position == "bottom":
+            y_position = new_height - n * line_step - caption_y_offset
+        else:
+            y_position = caption_y_offset
+        y_bottom = y_position + n * line_step
+
+        horiz_ok = True
+        for wl in wrapped:
+            try:
+                if _caption_line_width(measure, wl, font) > max_text_width:
+                    horiz_ok = False
+                    break
+            except Exception:
+                horiz_ok = False
+                break
+        vert_ok = y_position >= 0 and y_bottom <= new_height
+        if horiz_ok and vert_ok:
+            if fs < font_size:
+                logger.debug(
+                    "Caption layout: reduced font_size %s -> %s for %s (wrap / fit)",
+                    font_size,
+                    fs,
+                    img_basename,
+                )
+            return font, wrapped, line_step, y_position, fs
+        fs -= 1
+
+    font = _load_caption_font(MIN_CAPTION_FONT_SIZE, font_path, img_basename)
+    wrapped = []
+    for idx, segment in enumerate(text_lines):
+        if idx == 0:
+            if segment.strip():
+                wrapped.append(segment.strip())
+        else:
+            wrapped.extend(_wrap_caption_line_to_width(measure, segment, font, max_text_width))
+    line_step = max(1, int(MIN_CAPTION_FONT_SIZE * 1.2))
+    n = len(wrapped)
+    if caption_position == "bottom":
+        y_position = new_height - n * line_step - caption_y_offset
+    else:
+        y_position = caption_y_offset
+    if font_size > MIN_CAPTION_FONT_SIZE:
+        logger.debug(
+            "Caption layout: using minimum font_size %s for %s (still may clip)",
+            MIN_CAPTION_FONT_SIZE,
+            img_basename,
+        )
+    return font, wrapped, line_step, y_position, MIN_CAPTION_FONT_SIZE
+
+
 def image_resize_and_add_caption(image_path, temp_dir, target_width, target_height, max_file_size, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
     """
     Resize image to fit the target dimensions and ensure it's under max_file_size.
@@ -707,9 +837,6 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 
                 # Create a copy of the image for drawing
                 img_with_text = resized_img.copy()
-                
-                font = _load_caption_font(font_size, font_path, img_basename)
-                
                 draw = ImageDraw.Draw(img_with_text)
                 
                 # Get image creation date from EXIF data if available
@@ -746,21 +873,25 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 else:
                     location_text = None
                 
-                # Prepare text lines
+                # Prepare text lines (date + optional location); wrap + shrink font to fit
                 text_lines = [date_text]
                 if location_text:
                     text_lines.append(location_text)
-                
-                # Calculate text positions
+
                 caption_y_offset = 100
                 caption_x_offset = 100
-                if caption_position == "bottom":
-                    y_position = new_height - (len(text_lines) * font_size * 1.2) - caption_y_offset  
-                else:  # top
-                    y_position = caption_y_offset
-
-                line_step = int(font_size * 1.2)
-                y_bottom = y_position + len(text_lines) * line_step
+                font, wrapped_lines, line_step, y_position, used_font_size = _fit_caption_layout(
+                    text_lines,
+                    new_width,
+                    new_height,
+                    caption_position,
+                    font_size,
+                    font_path,
+                    img_basename,
+                    caption_y_offset,
+                    caption_x_offset,
+                )
+                y_bottom = y_position + len(wrapped_lines) * line_step
                 if y_position < 0 or y_bottom > new_height:
                     logger.warning(
                         "Caption layout: vertical range may clip or fall outside image for %s "
@@ -770,17 +901,17 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                         y_position,
                         y_bottom,
                         new_height,
-                        len(text_lines),
-                        font_size,
+                        len(wrapped_lines),
+                        used_font_size,
                         caption_position,
                     )
-                
+
                 # Draw text with outline for better visibility
                 outline_color = (0, 0, 0) if text_color == (255, 255, 255) else (255, 255, 255)
                 outline_width = 2
-                
+
                 try:
-                    for i, line in enumerate(text_lines):
+                    for i, line in enumerate(wrapped_lines):
                         x0 = caption_x_offset
                         y0 = y_position + i * line_step
                         for dx in range(-outline_width, outline_width + 1):
@@ -808,12 +939,13 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 except Exception as e:
                     logger.warning("Caption draw: failed for %s: %s", img_basename, e)
                     raise
-                
+
                 logger.debug(
-                    "Caption applied: %s date_source=%s lines=%r",
+                    "Caption applied: %s date_source=%s lines=%r font_size=%s",
                     img_basename,
                     date_source,
-                    text_lines,
+                    wrapped_lines,
+                    used_font_size,
                 )
                 
                 resized_img = img_with_text
