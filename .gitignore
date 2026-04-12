@@ -11,6 +11,10 @@ __pycache__/
 .Python
 .venv/
 MEMORY.md
+# Local-only planning / agent docs (not shared via repo)
+REQUIREMENTS.md
+PLAN.md
+AGENTS.md
 .specstory/
 
 # Local cache (geolocation and future cache types)
