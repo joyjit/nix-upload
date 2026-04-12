@@ -34,6 +34,7 @@ This script removes existing photos from the **target playlist** before uploadin
    python -m pip install --upgrade pip
    pip install -r requirements.txt
    ```
+   `requirements.txt` is fully pinned (direct and transitive). To change dependencies, edit `requirements.in`, install [pip-tools](https://pypi.org/project/pip-tools/), run `pip-compile -o requirements.txt requirements.in`, then commit both files.
 
 4. **Configure the Application**
    - Edit `config.json` with your credentials and preferences
