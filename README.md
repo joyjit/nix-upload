@@ -7,14 +7,14 @@ This script removes existing photos from the **target playlist** before uploadin
 
 ## How to Install
 1. **Prerequisites**
-   - Python 3.8 or higher
+   - Python 3.10 or higher (current pinned dependencies require 3.10+; e.g. Pillow 12, Selenium 4.43)
    - A Nixplay account
    - Local directory containing photos to upload
    - Chrome or Chromium for Selenium (if none is found on your system, the script can download Chrome for Testing into a cache directory)
 
 2. **Set Up Project Directory**
    - Create a new directory for the project
-   - Copy the following files into it:
+   - Copy the following files into it (or clone this repository so you also have `requirements.in` if you will regenerate `requirements.txt` with pip-tools):
      - `nix-upload.py`
      - `requirements.txt`
      - `sample_config.json`
@@ -58,7 +58,7 @@ This script removes existing photos from the **target playlist** before uploadin
 The script uses a `config.json` file for configuration. Here are all available parameters:
 
 ### Required Parameters
-- `username`: Your Nixplay account username
+- `username`: Your Nixplay account email (login identifier)
 - `password`: Your Nixplay account password
 - `photos_directory`: Path to the directory containing your photos (no default; must be set in `config.json`)
 
@@ -141,7 +141,7 @@ The script clears the **target playlist** before uploading (so previous photos i
 Setting **delete_my_uploads** to **true** deletes content in the **My uploads** album. Clearing the playlist happens regardless when the run proceeds to upload.
 
 ## Known issues:
-- I dont know why this warning shows, but it seems to be a benign message
+- I don't know why this warning shows, but it seems to be a benign message
 "Attempting to use a delegate that only supports static-sized tensors with a graph that has dynamic-sized tensors (tensor#-1 is a dynamic-sized tensor)."
 - In your config.json file, set "max_photos" to not more than 1900, and "batch_size" to not more than 100, for best performance
 
