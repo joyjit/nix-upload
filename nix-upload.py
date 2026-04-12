@@ -28,7 +28,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 # Initialize logger with a basic configuration
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
 logger.addHandler(handler)
 # Set an initial level - this will be overridden by config if available
 logger.setLevel(logging.INFO)
