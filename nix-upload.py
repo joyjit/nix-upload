@@ -39,6 +39,21 @@ log_file_path = None
 # Global variable to store debug directory
 debug_directory = 'debug'
 
+def _flush_stdio_and_log_handlers():
+    """Ensure piped runs (e.g. `tee`) and FileHandler see final lines."""
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    for lg in (logging.getLogger(), logging.getLogger(__name__)):
+        for h in lg.handlers:
+            try:
+                h.flush()
+            except Exception:
+                pass
+
+
 def setup_file_logging(debug_dir='debug'):
     """Set up file logging with a timestamped log file."""
     global log_file_path, debug_directory
@@ -251,7 +266,55 @@ def display_progress_bar(prefix, start_time, timeout, current, total, suffix="",
     
 def end_progress_bar():
     print()
-    
+
+
+def _upload_effective_stall_seconds(base_stall: int, last_count: int, batch_end: int) -> int:
+    """
+    Nixplay often pauses longer on the last file(s). A fixed short stall (e.g. 50s) exits
+    while the UI still shows 49/50 with empty text ticks — false 'incomplete batch' warnings.
+    """
+    if last_count <= 0:
+        return base_stall
+    remaining = batch_end - last_count
+    if remaining <= 0:
+        return base_stall
+    if remaining == 1:
+        return max(base_stall, 180)
+    if remaining <= 3:
+        return max(base_stall, 120)
+    return base_stall
+
+
+# Extra headroom on the per-batch wall clock so we do not hit max_upload_time while
+# _upload_effective_stall_seconds (up to 180s) + _grace_poll_upload_progress run after (n-1)/n.
+UPLOAD_MONITOR_TAIL_SLACK_SEC = 300
+# When already at (n-1)/n, allow this much beyond max_upload_time before giving up (slow last file).
+UPLOAD_LAST_FILE_GRACE_DEADLINE_SEC = 420
+
+
+def _grace_poll_upload_progress(driver, upload_text_xpath: str, batch_end_count: int, final_progress: int, seconds: float = 60.0, interval: float = 2.0) -> int:
+    """After a stall threshold, poll a few more times — counter may update late."""
+    best = final_progress
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        time.sleep(interval)
+        try:
+            el = driver.find_element(By.XPATH, upload_text_xpath)
+            t = el.text.strip()
+            if " of " not in t:
+                continue
+            parts = t.split(" of ")
+            p = int(parts[0])
+            if p > best:
+                best = p
+                logger.debug("Grace poll: upload progress now %s (target %s)", p, batch_end_count)
+            if p >= batch_end_count:
+                return best
+        except Exception:
+            continue
+    return best
+
+
 def get_image_files(directory, max_file_size_mb, max_photos, target_width, target_height, date_format="%Y-%m-%d %H:%M", caption_position="bottom", font_size=40, font_path=None, caption=True, reverse_geocode=True, cache_directory=None):
     """Recursively get all image files from a directory, skipping folders with a .nonixplay file."""
     valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
@@ -1523,7 +1586,7 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
     final_progress = 0  # Track the final progress count
     last_progress_change_time = time.time()
     stall_timeout = min(200, len(batch))
-    max_upload_time = max(300, 2 * len(batch)*batch_number)
+    max_upload_time = max(300, 2 * len(batch) * batch_number) + UPLOAD_MONITOR_TAIL_SLACK_SEC
     logger.debug(f"batch_len={len(batch)}, batch_number={batch_number}, batch_count={batch_count} batch_end_count={batch_end_count} max_upload_time={max_upload_time}")
     start_time = time.time()
 
@@ -1578,8 +1641,13 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
         except Exception as e:
             logger.warning(f"Error checking for server error modal: {e}")
             
-        # Check for absolute timeout
-        if time.time() - start_time > max_upload_time:
+        # Check for absolute timeout — extend while stuck on last file (199/200 can be slow vs deadline)
+        elapsed = time.time() - start_time
+        # Match _upload_effective_stall_seconds: last 1–3 files need long stalls + grace (avoid hard_cap first)
+        tail_floor = max(1, batch_end_count - 3)
+        in_tail_risk_zone = last_progress > 0 and last_progress >= tail_floor
+        hard_cap = max_upload_time + (UPLOAD_LAST_FILE_GRACE_DEADLINE_SEC if in_tail_risk_zone else 0)
+        if elapsed > hard_cap:
             save_debug_snapshot(driver, f"maximum_upload_time_{batch_number}")
             # Try to get final progress before breaking
             try:
@@ -1588,9 +1656,12 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                 if " of " in text:
                     parts = text.split(" of ")
                     final_progress = int(parts[0])
-            except:
+            except Exception:
                 pass  # If we can't get it, use the last known value
-            logger.info(f"\nMaximum upload time ({max_upload_time}s) reached. Final progress: {final_progress}/{batch_end_count}")
+            logger.info(
+                f"\nMaximum upload time ({hard_cap}s, base {max_upload_time}s) reached. "
+                f"Final progress: {final_progress}/{batch_end_count}"
+            )
             break
             
         time.sleep(2)
@@ -1617,8 +1688,8 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
                 # Calculate the progress relative to this batch
                 total_for_batch = len(batch)
                     
-                batch_start_count = (batch_number-1)*total_for_batch+1
-                batch_progress = current_progress - batch_start_count + 1
+                batch_start_count = (batch_number - 1) * total_for_batch + 1
+                batch_progress = max(0, current_progress - batch_start_count + 1)
 
                 display_progress_bar("Uploading", start_time, max_upload_time, batch_progress, total_for_batch, 
                     f"(Total: {current_progress}/{website_total}) (Batch {batch_number} of {batch_count})")
@@ -1636,10 +1707,25 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
             else:
                 print(f"\rUploading: Waiting for progress update... ('{text}')", end="")
                 
-            # Check for stalled progress
-            if time.time() - last_progress_change_time > stall_timeout:
-                logger.info(f"\nProgress stalled for {stall_timeout}s - checking completion status")
+            # Check for stalled progress (longer window when 1–3 files remain — last uploads lag)
+            effective_stall = _upload_effective_stall_seconds(stall_timeout, last_progress, batch_end_count)
+            if time.time() - last_progress_change_time > effective_stall:
+                logger.info(
+                    f"\nNo upload count increase for {effective_stall}s (base stall {stall_timeout}s) — snapshot + grace poll"
+                )
                 save_debug_snapshot(driver, f"progress_stalled_batch_number_{batch_number}_of_{batch_count}")
+                polled = _grace_poll_upload_progress(
+                    driver, upload_text_xpath, batch_end_count, final_progress
+                )
+                if polled > final_progress:
+                    final_progress = polled
+                    last_progress = max(last_progress, polled)
+                    last_progress_change_time = time.time()
+                if final_progress >= batch_end_count:
+                    time.sleep(5)
+                    logger.debug("Grace poll: reached batch target %s", batch_end_count)
+                    break
+                logger.info("Grace poll did not reach target; ending upload monitor for this batch")
                 break
                 
         except NoSuchElementException:
@@ -1661,12 +1747,37 @@ def upload_batch(driver, batch, batch_number, batch_count, batch_end_count, logf
             # Don't update the last_progress_change_time on errors
     
     print(f"\r")
-    
+
+    # After stall/timeout/element loss, the counter sometimes updates a moment later — re-read once.
+    try:
+        upload_text_elem = driver.find_element(By.XPATH, upload_text_xpath)
+        text_after = upload_text_elem.text.strip()
+        if " of " in text_after:
+            parts = text_after.split(" of ")
+            parsed_after = int(parts[0])
+            if parsed_after > final_progress:
+                logger.debug(
+                    "Upload progress after wait: %s (was %s)",
+                    parsed_after,
+                    final_progress,
+                )
+                final_progress = parsed_after
+    except Exception:
+        pass
+
     # Verify that all files were uploaded successfully
     if final_progress > 0 and final_progress < batch_end_count:
         missing_count = batch_end_count - final_progress
-        logger.warning(f"⚠️  WARNING: Batch {batch_number} incomplete! Only {final_progress}/{batch_end_count} files uploaded. {missing_count} file(s) failed to upload.")
-        logger.warning(f"This may indicate upload failures. Check the debug snapshots for details.")
+        logger.warning(
+            f"⚠️  WARNING: Batch {batch_number} incomplete! Only {final_progress}/{batch_end_count} "
+            f"files uploaded. {missing_count} file(s) failed to upload."
+        )
+        logger.warning(
+            "Check %s for progress_stalled_* and server_error_modal_* snapshots; "
+            "search the log for 'Failed Upload' and 'Server rejected'. "
+            "If the site shows 50/50 there but this warning fired, report a false positive (stall/DOM timing).",
+            debug_directory,
+        )
         # Return the actual progress count so caller can track real uploads
         return final_progress
     elif final_progress == 0:
@@ -1801,6 +1912,7 @@ def main():
             exit(1)
         
         logger.info("Nixplay photo upload completed successfully!")
+        _flush_stdio_and_log_handlers()
     except Exception as e:
         logger.error(f"main() Exception: {str(e)}")
         save_debug_snapshot(driver, "unexpected_error")
@@ -1808,6 +1920,10 @@ def main():
         logger.debug("Closing WebDriver...")
         save_debug_snapshot(driver, "final_state_before_exit")
         driver.quit()
+        try:
+            logging.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
