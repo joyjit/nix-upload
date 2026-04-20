@@ -337,6 +337,24 @@ def get_image_files(directory, max_file_size_mb, max_photos, target_width, targe
         else:
             selected_images = image_files
             logger.info(f"Selected all {len(selected_images)} photos for upload (fewer than max_photos).")
+
+        if caption:
+            preflight_errors = []
+            for img_path in selected_images:
+                img_basename = os.path.basename(img_path)
+                try:
+                    with Image.open(img_path) as img:
+                        _get_gps_coordinates(img, source_hint=img_basename, raise_on_error=True)
+                except Exception as e:
+                    preflight_errors.append(f"{img_basename}: {e}")
+                    if len(preflight_errors) >= 5:
+                        break
+            if preflight_errors:
+                detail = "; ".join(preflight_errors)
+                raise RuntimeError(
+                    "Pre-upload metadata validation failed. "
+                    f"Aborting before upload. Sample errors: {detail}"
+                )
         
         # Create temporary directory for processed images
         temp_dir = tempfile.mkdtemp(prefix="nix_upload_temp_")
@@ -386,11 +404,53 @@ def _convert_to_degrees(value):
     s = float(value[2])
     return d + (m / 60.0) + (s / 3600.0)
 
-def _get_gps_coordinates(img, source_hint=None):
+def _read_exif_data(img):
+    """Read EXIF data from PIL image object across image backends."""
+    try:
+        getexif = getattr(img, "getexif", None)
+        if callable(getexif):
+            exif = getexif()
+            if exif:
+                return dict(exif.items())
+    except Exception:
+        pass
+    try:
+        legacy_getexif = getattr(img, "_getexif", None)
+        if callable(legacy_getexif):
+            exif = legacy_getexif()
+            if exif:
+                return exif
+    except Exception:
+        pass
+    return None
+
+def _extract_gps_info_block(img, exif):
+    """Get GPSInfo block from either EXIF dict or GPS IFD."""
+    gps_tag_id = 34853  # Exif GPSInfo tag
+
+    if isinstance(exif, dict):
+        direct = exif.get(gps_tag_id)
+        if isinstance(direct, dict):
+            return direct
+
+    try:
+        getexif = getattr(img, "getexif", None)
+        if callable(getexif):
+            exif_obj = getexif()
+            if exif_obj and hasattr(exif_obj, "get_ifd"):
+                gps_ifd = exif_obj.get_ifd(gps_tag_id)
+                if isinstance(gps_ifd, dict):
+                    return gps_ifd
+    except Exception:
+        pass
+
+    return None
+
+def _get_gps_coordinates(img, source_hint=None, raise_on_error=False):
     """Extract GPS coordinates from image EXIF data."""
     hint = source_hint or "image"
     try:
-        exif = img._getexif()
+        exif = _read_exif_data(img)
         if not exif:
             logger.debug("Caption GPS: no EXIF (or format without EXIF) for %s", hint)
             return None
@@ -400,28 +460,25 @@ def _get_gps_coordinates(img, source_hint=None):
         gps_lat_ref = None
         gps_lon = None
         gps_lon_ref = None
-        gps_block = None
-
-        for tag_id in exif:
-            tag = TAGS.get(tag_id, tag_id)
-            data = exif.get(tag_id)
-            
-            if tag == 'GPSInfo':
-                gps_block = data
-                for key in data.keys():
-                    sub_tag = GPSTAGS.get(key, key)
-                    if sub_tag == 'GPSLatitude':
-                        gps_lat = data[key]
-                    elif sub_tag == 'GPSLatitudeRef':
-                        gps_lat_ref = data[key]
-                    elif sub_tag == 'GPSLongitude':
-                        gps_lon = data[key]
-                    elif sub_tag == 'GPSLongitudeRef':
-                        gps_lon_ref = data[key]
+        gps_block = _extract_gps_info_block(img, exif)
 
         if gps_block is None:
             logger.debug("Caption GPS: EXIF present but no GPSInfo for %s", hint)
             return None
+        if not isinstance(gps_block, dict):
+            logger.debug("Caption GPS: GPSInfo block is not a dict for %s", hint)
+            return None
+
+        for key in gps_block.keys():
+            sub_tag = GPSTAGS.get(key, key)
+            if sub_tag == 'GPSLatitude':
+                gps_lat = gps_block[key]
+            elif sub_tag == 'GPSLatitudeRef':
+                gps_lat_ref = gps_block[key]
+            elif sub_tag == 'GPSLongitude':
+                gps_lon = gps_block[key]
+            elif sub_tag == 'GPSLongitudeRef':
+                gps_lon_ref = gps_block[key]
 
         if not (gps_lat and gps_lon):
             logger.debug(
@@ -451,6 +508,8 @@ def _get_gps_coordinates(img, source_hint=None):
 
         return (lat, lon)
     except Exception as e:
+        if raise_on_error:
+            raise
         logger.warning("Caption GPS: failed to extract coordinates for %s: %s", hint, e)
     return None
 
@@ -854,13 +913,14 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
     img_basename = os.path.basename(image_path)
     try:
         with Image.open(image_path) as img:
+            exif_img = img
             try:
                 # Normalize orientation from EXIF so resized/uploaded pixels are upright.
                 img = ImageOps.exif_transpose(img)
             except Exception as e:
                 logger.warning("EXIF orientation normalize failed for %s: %s", img_basename, e)
 
-            coordinates = _get_gps_coordinates(img, source_hint=img_basename) if caption else None
+            coordinates = _get_gps_coordinates(exif_img, source_hint=img_basename) if caption else None
             geo_out = [None]
             geo_thread = None
             if caption and coordinates and reverse_geocode:
@@ -911,7 +971,7 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
                 # Get image creation date from EXIF data if available
                 date_source = "exif"
                 try:
-                    exif = img._getexif()
+                    exif = _read_exif_data(exif_img)
                     if exif and 36867 in exif:  # 36867 is DateTimeOriginal
                         date_str = exif[36867]
                         date_obj = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
