@@ -20,7 +20,7 @@ import shutil
 import sys
 import urllib.request
 import zipfile
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PIL.ExifTags import TAGS, GPSTAGS
 
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
@@ -854,6 +854,12 @@ def image_resize_and_add_caption(image_path, temp_dir, target_width, target_heig
     img_basename = os.path.basename(image_path)
     try:
         with Image.open(image_path) as img:
+            try:
+                # Normalize orientation from EXIF so resized/uploaded pixels are upright.
+                img = ImageOps.exif_transpose(img)
+            except Exception as e:
+                logger.warning("EXIF orientation normalize failed for %s: %s", img_basename, e)
+
             coordinates = _get_gps_coordinates(img, source_hint=img_basename) if caption else None
             geo_out = [None]
             geo_thread = None
