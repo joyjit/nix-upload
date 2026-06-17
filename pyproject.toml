@@ -1,0 +1,16 @@
+[project]
+name = "nix-upload"
+version = "0.1.0"
+description = "Upload local photos to Nixplay playlists via Selenium"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = [
+    "selenium>=4.0.0",
+    "Pillow>=10.4.0",
+    "geopy==2.4.1",
+    "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+dev = ["pip-tools"]

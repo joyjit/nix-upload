@@ -14,7 +14,7 @@ This script removes existing photos from the **target playlist** before uploadin
 
 2. **Set Up Project Directory**
    - Create a new directory for the project
-   - Copy the following files into it (or clone this repository so you also have `requirements.in` if you will regenerate `requirements.txt` with pip-tools):
+   - Copy the following files into it (or clone this repository so you also have `pyproject.toml` if you will regenerate `requirements.txt` with pip-tools):
      - `nix-upload.py`
      - `requirements.txt`
      - `sample_config.json`
@@ -34,7 +34,7 @@ This script removes existing photos from the **target playlist** before uploadin
    python -m pip install --upgrade pip
    pip install -r requirements.txt
    ```
-   `requirements.txt` is fully pinned (direct and transitive). To change dependencies, edit `requirements.in`, install [pip-tools](https://pypi.org/project/pip-tools/), run `pip-compile -o requirements.txt requirements.in`, then commit both files.
+   `requirements.txt` is fully pinned (direct and transitive). To change dependencies, edit `dependencies` in `pyproject.toml`, install [pip-tools](https://pypi.org/project/pip-tools/), run `pip-compile -o requirements.txt pyproject.toml`, then commit both files.
 
 4. **Configure the Application**
    - Edit `config.json` with your credentials and preferences
