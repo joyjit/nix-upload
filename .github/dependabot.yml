@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Python packages: bumps the pinned versions in requirements.txt.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      python-packages:
+        patterns: ["*"]

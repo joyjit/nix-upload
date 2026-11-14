@@ -7,34 +7,27 @@ This script removes existing photos from the **target playlist** before uploadin
 
 ## How to Install
 1. **Prerequisites**
-   - Python 3.10 or higher (current pinned dependencies require 3.10+; e.g. Pillow 12, Selenium 4.43)
+   - Python 3.10 or higher and [pipx](https://pipx.pypa.io/) (on Debian/Ubuntu: `sudo apt install pipx`)
+   - Google Chrome or Chromium, installed with your system's package manager (on Debian/Ubuntu, `google-chrome-stable` from Google's apt repository). This keeps the browser updated and its libraries installed. The script does not download a browser; if none is found it stops with an error. Set `CHROME_BIN` to use a browser in a non-standard location.
    - A Nixplay account
    - Local directory containing photos to upload
-   - Chrome or Chromium for Selenium (if none is found on your system, the script can download Chrome for Testing into a cache directory)
 
-2. **Set Up Project Directory**
-   - Create a new directory for the project
-   - Copy the following files into it (or clone this repository so you also have `pyproject.toml` if you will regenerate `requirements.txt` with pip-tools):
-     - `nix-upload.py`
-     - `requirements.txt`
-     - `sample_config.json`
-   - Make a copy of `sample_config.json` and name it `config.json`:
-     ```bash
-     # Windows
-     copy sample_config.json config.json
-     
-     # macOS/Linux
-     cp sample_config.json config.json
-     ```
+2. **Install a release**
 
-3. **Create a Virtual Environment and Install Dependencies**
+   Install a tagged release from GitHub (replace `v1.1` with the release you want). The `-c` option installs the exact package versions pinned in that release's `requirements.txt`:
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   python -m pip install --upgrade pip
-   pip install -r requirements.txt
+   TAG=v1.1
+   REPO=https://github.com/joyjit/nix-upload
+   RAW=https://raw.githubusercontent.com/joyjit/nix-upload
+   pipx install --force \
+     --pip-args="-c $RAW/$TAG/requirements.txt" \
+     "git+$REPO@$TAG"
    ```
-   `requirements.txt` is fully pinned (direct and transitive). To change dependencies, edit `dependencies` in `pyproject.toml`, install [pip-tools](https://pypi.org/project/pip-tools/), run `pip-compile -o requirements.txt pyproject.toml`, then commit both files.
+   This puts a `nix-upload` command on your PATH (usually `~/.local/bin/nix-upload`). To upgrade or roll back, run the same commands with a different tag.
+
+3. **Create a working directory and config**
+   - Create a directory for the tool's config, logs and caches, and copy [`sample_config.json`](sample_config.json) into it as `config.json`.
+   - `debug_directory` and `cache_directory` are relative to the directory you run the command from.
 
 4. **Configure the Application**
    - Edit `config.json` with your credentials and preferences
@@ -43,15 +36,24 @@ This script removes existing photos from the **target playlist** before uploadin
      - `password`: Your Nixplay account password
      - `photos_directory`: Absolute or relative path to the root folder containing photos (searched recursively)
 
-5. **Run**
+5. **Run** (from the working directory)
    ```bash
-   python nix-upload.py
+   nix-upload
    ```
-   
+
    You can also specify a custom configuration file using the `--config` (or `-c`) option:
    ```bash
-   python nix-upload.py --config my-custom-config.json
+   nix-upload --config my-custom-config.json
    ```
+
+### Running from a source checkout (development)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python nix_upload.py --config config.json
+```
+`requirements.txt` is fully pinned (direct and transitive). To change dependencies, edit `dependencies` in `pyproject.toml`, install [pip-tools](https://pypi.org/project/pip-tools/), run `pip-compile --strip-extras -o requirements.txt pyproject.toml`, then commit both files. Dependabot opens a monthly pull request to update the pinned versions.
 
 ## Configuration Parameters
 
@@ -130,9 +132,9 @@ Common date format options for the `date_format` parameter:
 ```
 
 ## To run:
-1. open a command shell in the "nix-upload" directory on your computer
-2. Run "python nix-upload.py"
-   - Optionally specify a custom config file: "python nix-upload.py --config my-config.json"
+1. Open a command shell in your working directory (the one with `config.json`)
+2. Run `nix-upload`
+   - Optionally specify a custom config file: `nix-upload --config my-config.json`
 
 ## NOTE
 The script clears the **target playlist** before uploading (so previous photos in that playlist are removed). If **delete_my_uploads** is **true**, it also clears the separate **My uploads** album at the start of the run.

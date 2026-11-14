@@ -18,8 +18,6 @@ import tempfile
 import atexit
 import shutil
 import sys
-import urllib.request
-import zipfile
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PIL.ExifTags import TAGS, GPSTAGS
 
@@ -1111,8 +1109,6 @@ def setup_webdriver(headless):
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--ignore-certificate-errors")
         options.page_load_strategy = 'normal'
         
         run_headless = headless
@@ -1120,7 +1116,6 @@ def setup_webdriver(headless):
             logger.warning("DISPLAY is not set; forcing headless Chrome mode.")
             run_headless = True
 
-        options.headless = run_headless
         if run_headless:
             options.add_argument("--headless=new")
             options.add_argument("--remote-debugging-port=0")
@@ -1132,9 +1127,8 @@ def setup_webdriver(headless):
         # gemini
         options.add_argument("--silent")
 
-        # Pick an explicit Chrome/Chromium binary when available.
-        # If not available system-wide, download Chrome for Testing locally.
-        chrome_binary = resolve_chrome_binary(prefer_headless_shell=False)
+        # Always use an installed browser; never let Selenium Manager fetch one.
+        chrome_binary = resolve_chrome_binary()
         options.binary_location = chrome_binary
         logger.info(f"Using browser binary: {chrome_binary}")
         
@@ -1147,57 +1141,13 @@ def setup_webdriver(headless):
         exit(1)
 
 
-def resolve_chrome_binary(prefer_headless_shell=False):
-    """Resolve browser binary path, downloading a local copy if needed."""
-    def ensure_executable(binary_path):
-        if not os.path.exists(binary_path):
-            return
-        if os.name == "nt":
-            return
-        try:
-            current_mode = os.stat(binary_path).st_mode
-            os.chmod(binary_path, current_mode | 0o111)
-        except Exception as chmod_error:
-            raise RuntimeError(f"Failed to make browser binary executable: {binary_path}") from chmod_error
+def resolve_chrome_binary():
+    """Return the path of an installed Chrome/Chromium binary.
 
-    def ensure_browser_permissions(browser_binary_path):
-        ensure_executable(browser_binary_path)
-        browser_dir = os.path.dirname(browser_binary_path)
-        for helper_name in ("chrome_crashpad_handler", "chrome-sandbox"):
-            ensure_executable(os.path.join(browser_dir, helper_name))
-
-    def get_platform_info():
-        if sys.platform.startswith("win"):
-            return {
-                "cft_platform": "win64",
-                "chrome_rel": os.path.join("chrome-win64", "chrome.exe"),
-                "headless_rel": os.path.join("chrome-headless-shell-win64", "chrome-headless-shell.exe"),
-                "archive_suffix": "win64",
-            }
-        if sys.platform == "darwin":
-            if os.uname().machine == "arm64":
-                suffix = "mac-arm64"
-                chrome_rel = os.path.join("chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing")
-                headless_rel = os.path.join("chrome-headless-shell-mac-arm64", "chrome-headless-shell")
-            else:
-                suffix = "mac-x64"
-                chrome_rel = os.path.join("chrome-mac-x64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing")
-                headless_rel = os.path.join("chrome-headless-shell-mac-x64", "chrome-headless-shell")
-            return {
-                "cft_platform": suffix,
-                "chrome_rel": chrome_rel,
-                "headless_rel": headless_rel,
-                "archive_suffix": suffix,
-            }
-        return {
-            "cft_platform": "linux64",
-            "chrome_rel": os.path.join("chrome-linux64", "chrome"),
-            "headless_rel": os.path.join("chrome-headless-shell-linux64", "chrome-headless-shell"),
-            "archive_suffix": "linux64",
-        }
-
-    platform_info = get_platform_info()
-
+    The browser must be installed through the system package manager (or
+    pointed to with CHROME_BIN) so it receives updates and its shared
+    libraries stay installed. No browser is downloaded automatically.
+    """
     chrome_candidates = [
         os.environ.get("CHROME_BIN"),
         shutil.which("google-chrome"),
@@ -1220,69 +1170,13 @@ def resolve_chrome_binary(prefer_headless_shell=False):
         "/Applications/Chromium.app/Contents/MacOS/Chromium",
     ]
     chrome_binary = next((c for c in chrome_candidates if c and os.path.exists(c)), None)
-    if chrome_binary:
-        return chrome_binary
-
-    # Fallback: download Chrome for Testing locally without requiring root.
-    cache_root = os.path.join(os.path.expanduser("~"), ".cache", "nix-upload", "chrome-for-testing")
-    cached_chrome = os.path.join(cache_root, platform_info["chrome_rel"])
-    cached_headless_shell = os.path.join(cache_root, platform_info["headless_rel"])
-    if prefer_headless_shell and os.path.exists(cached_headless_shell):
-        ensure_browser_permissions(cached_headless_shell)
-        return cached_headless_shell
-    if os.path.exists(cached_chrome) and not prefer_headless_shell:
-        ensure_browser_permissions(cached_chrome)
-        return cached_chrome
-
-    os.makedirs(cache_root, exist_ok=True)
-    metadata_url = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
-    logger.info("No system browser binary found. Downloading Chrome for Testing artifacts...")
-    try:
-        with urllib.request.urlopen(metadata_url, timeout=30) as response:
-            metadata = json.loads(response.read().decode("utf-8"))
-        downloads = metadata["channels"]["Stable"]["downloads"]
-
-        artifact_suffix = platform_info["archive_suffix"]
-        artifacts = [("chrome", f"chrome-{artifact_suffix}.zip")]
-        if prefer_headless_shell:
-            artifacts.insert(0, ("chrome-headless-shell", f"chrome-headless-shell-{artifact_suffix}.zip"))
-
-        for artifact_name, local_zip_name in artifacts:
-            artifact_downloads = downloads.get(artifact_name, [])
-            platform_download = next(
-                (d for d in artifact_downloads if d.get("platform") == platform_info["cft_platform"]),
-                None
-            )
-            if not platform_download or "url" not in platform_download:
-                continue
-            zip_url = platform_download["url"]
-            zip_path = os.path.join(cache_root, local_zip_name)
-            urllib.request.urlretrieve(zip_url, zip_path)
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(cache_root)
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-    except Exception as download_error:
+    if not chrome_binary:
         raise RuntimeError(
-            "Failed to obtain Chrome binary automatically. "
-            "Install Chromium/Chrome or set CHROME_BIN."
-        ) from download_error
-
-    if prefer_headless_shell and os.path.exists(cached_headless_shell):
-        ensure_browser_permissions(cached_headless_shell)
-        return cached_headless_shell
-    if os.path.exists(cached_chrome):
-        ensure_browser_permissions(cached_chrome)
-        return cached_chrome
-    if os.path.exists(cached_headless_shell):
-        ensure_browser_permissions(cached_headless_shell)
-        return cached_headless_shell
-    if not os.path.exists(cached_chrome):
-        raise RuntimeError(
-            "Chrome download completed but binary was not found at expected path: "
-            f"{cached_chrome}"
+            "No Chrome/Chromium browser found. Install Google Chrome with your "
+            "system package manager (e.g. google-chrome-stable on Debian/Ubuntu) "
+            "or set CHROME_BIN to the browser binary."
         )
-    return cached_chrome
+    return chrome_binary
 
 
 def login_to_nixplay(driver, base_url, username, password):

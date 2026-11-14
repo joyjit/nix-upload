@@ -19,3 +19,6 @@ AGENTS.md
 
 # Local cache (geolocation and future cache types)
 cache/
+# Packaging build output
+build/
+*.egg-info/

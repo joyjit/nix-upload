@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "nix-upload"
-version = "0.1.0"
+version = "1.1.0"
 description = "Upload local photos to Nixplay playlists via Selenium"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -14,3 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pip-tools"]
+
+[project.scripts]
+nix-upload = "nix_upload:main"
+
+[tool.setuptools]
+py-modules = ["nix_upload"]
