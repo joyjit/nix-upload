@@ -136,6 +136,24 @@ Common date format options for the `date_format` parameter:
 2. Run `nix-upload`
    - Optionally specify a custom config file: `nix-upload --config my-config.json`
 
+## Running on a schedule (cron)
+cron starts jobs with a minimal `PATH`, so use the full path to the command and `cd` into the working directory first (so `config.json`, `debug_directory` and `cache_directory` resolve there). Example, every other day at 22:00:
+```
+0 22 */2 * * cd /opt/nix-upload && $HOME/.local/bin/nix-upload
+```
+Run `which nix-upload` to find the path on your system.
+
+## Upgrading from an older version
+Versions before v1.1 were run by copying `nix-upload.py` and installing `requirements.txt` into a virtual environment. From v1.1:
+- The script file is now `nix_upload.py` (Python modules can't contain a dash), and it is installed as the `nix-upload` command with pipx (see [How to Install](#how-to-install)). Keep your existing working directory and `config.json`; only the install and the command you run change.
+- The script no longer downloads its own copy of Chrome. Install Chrome with your package manager first. Older versions kept that copy in `~/.cache/nix-upload/chrome-for-testing` (or `<working directory>/.cache/chrome-for-testing`); you can delete it. Keep any `reverse_geocode.csv` cache file.
+- Update any cron job or wrapper script to call `nix-upload` instead of `python nix-upload.py`.
+
+## Troubleshooting
+- **"No Chrome/Chromium browser found"**: install Google Chrome or Chromium with your package manager, or set the `CHROME_BIN` environment variable to the browser binary.
+- **"session not created: Chrome instance exited"** or missing `.so` libraries: the browser's system libraries are missing. Reinstalling the browser package (e.g. `sudo apt install --reinstall google-chrome-stable`) brings them back.
+- Logs and screenshots of failures are saved in `debug_directory`.
+
 ## NOTE
 The script clears the **target playlist** before uploading (so previous photos in that playlist are removed). If **delete_my_uploads** is **true**, it also clears the separate **My uploads** album at the start of the run.
 
